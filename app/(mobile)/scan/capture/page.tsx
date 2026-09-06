@@ -9,27 +9,93 @@ import { Icon } from '@/components/Icon';
 import { isReason } from '@/lib/constants';
 
 /**
- * A small JPEG of the shot, made in the browser.
+ * Decode whatever the user gave us and re-encode it as JPEG before upload.
  *
- * When the app runs somewhere with no file storage, this thumbnail is what gets kept as
- * the evidence image - so the capture flow works with a database and nothing else. The
- * full-resolution photo is still what the model reads; it just isn't stored.
+ * This is not an optimisation, it is what makes the photo usable at all:
+ *
+ *  - iOS hands back HEIC from the photo library. The vision call only accepts PNG,
+ *    JPEG, GIF and WebP, and most non-Safari browsers cannot decode HEIC either, so an
+ *    untouched library pick can fail on the server and produce no thumbnail on the
+ *    client - which is exactly how a capture ends up with no evidence photo.
+ *  - A 12MP phone photo is several megabytes of upload for no extra legibility.
+ *
+ * Returns the full-size JPEG to be read, plus a small one to keep as evidence. If the
+ * browser cannot decode the file at all we hand back the original and let the server
+ * give a clear error rather than silently dropping the capture.
  */
-async function makeThumbnail(blob: Blob): Promise<string | null> {
+type PreparedPhoto = { upload: Blob; filename: string; thumbnail: string | null };
+
+async function decode(blob: Blob): Promise<HTMLImageElement | ImageBitmap | null> {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      return await createImageBitmap(blob);
+    } catch {
+      // Fall through - Safari can refuse some sources here that <img> still handles.
+    }
+  }
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+    img.src = url;
+  });
+}
+
+function toJpeg(
+  source: HTMLImageElement | ImageBitmap,
+  longestEdge: number,
+  quality: number,
+): { canvas: HTMLCanvasElement } | null {
+  const sw = 'naturalWidth' in source ? source.naturalWidth : source.width;
+  const sh = 'naturalHeight' in source ? source.naturalHeight : source.height;
+  if (!sw || !sh) return null;
+  const scale = Math.min(1, longestEdge / Math.max(sw, sh));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(sw * scale));
+  canvas.height = Math.max(1, Math.round(sh * scale));
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.drawImage(source as CanvasImageSource, 0, 0, canvas.width, canvas.height);
+  void quality;
+  return { canvas };
+}
+
+async function preparePhoto(blob: Blob, filename: string): Promise<PreparedPhoto> {
+  const source = await decode(blob);
+  if (!source) return { upload: blob, filename, thumbnail: null };
+
   try {
-    const bitmap = await createImageBitmap(blob);
-    const width = 420;
-    const height = Math.max(1, Math.round((bitmap.height * width) / bitmap.width));
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, width, height);
-    bitmap.close();
-    const url = canvas.toDataURL('image/jpeg', 0.6);
-    // Guard against a runaway data URL ending up in a database row.
-    return url.length < 260_000 ? url : null;
+    // Big enough for the model to read handwriting, small enough to upload on 4G.
+    const full = toJpeg(source, 1600, 0.85);
+    const small = toJpeg(source, 420, 0.6);
+    if ('close' in source) source.close();
+    if (!full || !small) return { upload: blob, filename, thumbnail: null };
+
+    const upload = await new Promise<Blob | null>((resolve) =>
+      full.canvas.toBlob(resolve, 'image/jpeg', 0.85),
+    );
+    let thumbnail: string | null = null;
+    try {
+      const url = small.canvas.toDataURL('image/jpeg', 0.6);
+      thumbnail = url.length < 260_000 ? url : null;
+    } catch {
+      thumbnail = null;
+    }
+
+    return {
+      upload: upload ?? blob,
+      filename: upload ? filename.replace(/\.[^.]+$/, '') + '.jpg' : filename,
+      thumbnail,
+    };
   } catch {
-    return null;
+    return { upload: blob, filename, thumbnail: null };
   }
 }
 
@@ -115,13 +181,18 @@ function CaptureInner() {
       setBusy(true);
       setError(null);
       try {
-        const thumbnail = await makeThumbnail(blob);
+        const prepared = await preparePhoto(blob, filename);
 
         const form = new FormData();
-        form.append('photo', new File([blob], filename, { type: blob.type || 'image/jpeg' }));
+        form.append(
+          'photo',
+          new File([prepared.upload], prepared.filename, {
+            type: prepared.upload.type || 'image/jpeg',
+          }),
+        );
         form.append('reason', reason);
         if (sample) form.append('sample', sample);
-        if (thumbnail) form.append('thumbnail', thumbnail);
+        if (prepared.thumbnail) form.append('thumbnail', prepared.thumbnail);
 
         const response = await fetch('/api/captures', { method: 'POST', body: form });
         const data = (await response.json()) as { id?: string; error?: string };

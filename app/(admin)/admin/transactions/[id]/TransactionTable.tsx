@@ -15,7 +15,7 @@ type Line = {
 };
 
 export function TransactionTable({
-  transactionId, action, reference, voided, storeroomName, photo, transcript, evidence, catalogue, lines: initial,
+  transactionId, action, reference, voided, storeroomName, photo, hasCapture, transcript, evidence, catalogue, lines: initial,
 }: {
   transactionId: string;
   action: Action;
@@ -23,6 +23,8 @@ export function TransactionTable({
   voided: boolean;
   storeroomName: string;
   photo: string | null;
+  /** True when this came from a photographed list, even if the image itself is gone. */
+  hasCapture: boolean;
   transcript: string;
   evidence: { reference: string; capturedBy: string; capturedAt: string; reason: string; provider: string; model: string };
   catalogue: { id: string; name: string }[];
@@ -148,7 +150,10 @@ export function TransactionTable({
                         <img src={photo} alt="" className="size-full object-cover" />
                       </button>
                     ) : (
-                      <span className="text-xs text-content-medium">—</span>
+                      // A dash here just looks broken. Say which of the two reasons it is.
+                      <span className="text-[11px] leading-tight text-content-medium">
+                        {hasCapture ? 'Photo not stored' : 'Entered manually'}
+                      </span>
                     )}
                   </td>
 

@@ -46,7 +46,8 @@ export default async function TransactionPage({ params }: { params: Promise<{ id
       reference={transaction.reference}
       voided={transaction.voided}
       storeroomName={transaction.storeroom.name}
-      photo={transaction.capture ? photoUrl(transaction.capture.photoPath) : null}
+      photo={transaction.capture?.photoPath ? photoUrl(transaction.capture.photoPath) : null}
+      hasCapture={Boolean(transaction.capture)}
       transcript={transcript}
       evidence={{
         reference: transaction.reference,
