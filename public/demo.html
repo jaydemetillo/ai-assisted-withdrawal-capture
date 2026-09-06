@@ -598,26 +598,35 @@
         ${S.error ? `<div class="note"><span>&#9888;</span><div>${esc(S.error)}</div></div>` : ""}
         ${shotHTML(null)}
         <p class="tiny muted" style="margin:0;text-align:center">
-          ${S.photoURL ? "Ready to read." : live
-            ? "Take a photo of a list you wrote by hand, or read the sample above."
-            : "No API key on the server, so the sample note above will be read."}
+          ${S.photoURL ? (live ? "Ready to read." : "Photo attached, but reading is off - you will get the sample rows.")
+            : live ? "Photograph a list you wrote by hand, or pick one you already took."
+            : "Reading is off on this deployment, so your photo will not be read."}
         </p>
-        ${live ? `<label class="btn ghost" style="text-align:center">
-            ${S.photoURL ? "Choose a different photo" : "Take / choose a photo"}
-            <input id="file" type="file" accept="image/*" capture="environment" hidden>
-          </label>` : ""}`;
+        <div style="display:flex;gap:8px">
+          <label class="btn ghost" style="flex:1;text-align:center">
+            Take a photo
+            <input id="camera" type="file" accept="image/*" capture="environment" hidden>
+          </label>
+          <label class="btn ghost" style="flex:1;text-align:center">
+            ${S.photoURL ? "Pick another" : "Choose from library"}
+            <input id="library" type="file" accept="image/*" hidden>
+          </label>
+        </div>`;
       sticky.innerHTML = `<button class="btn" id="go" ${S.busy ? "disabled" : ""}>
         ${S.busy ? '<span class="spin"></span> Reading the handwriting&hellip;'
                  : S.photoURL ? "Read my photo" : "Read the sample note"}</button>`;
-      const f = $("file");
-      if (f) f.onchange = async e => {
+      const pick = async e => {
         const file = e.target.files && e.target.files[0];
+        e.target.value = "";            // so re-picking the same file still fires
         if (!file) return;
         if (S.photoURL) URL.revokeObjectURL(S.photoURL);
         S.file = file; S.photoURL = URL.createObjectURL(file); S.error = null;
         S.thumb = await shrink(file);
         paintPhone();
       };
+      const cam = $("camera"), lib = $("library");
+      if (cam) cam.onchange = pick;
+      if (lib) lib.onchange = pick;
       $("go").onclick = () => read(S.file);
       return;
     }

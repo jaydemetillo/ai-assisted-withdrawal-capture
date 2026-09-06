@@ -44,7 +44,8 @@ function CaptureInner() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const libraryRef = useRef<HTMLInputElement>(null);
 
   const [camera, setCamera] = useState<CameraState>('idle');
   const [readingLive, setReadingLive] = useState<boolean | null>(null);
@@ -79,7 +80,7 @@ function CaptureInner() {
       const insecure = typeof window !== 'undefined' && !window.isSecureContext;
       setCamera(insecure ? 'unavailable' : 'denied');
       if (insecure) {
-        setError('The camera needs HTTPS. Run `npm run dev:https`, or use "Choose a photo" below.');
+        setError('The camera needs HTTPS. Run `npm run dev:https`, or pick a photo from your library below.');
       } else if (err instanceof Error && err.name === 'NotAllowedError') {
         setError('Camera permission was declined. You can still pick a photo below.');
       } else {
@@ -134,6 +135,16 @@ function CaptureInner() {
       }
     },
     [reason, router, stopCamera],
+  );
+
+  const onPick = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      // Reset the input so picking the same file twice still fires a change event.
+      event.target.value = '';
+      if (file) void upload(file, file.name);
+    },
+    [upload],
   );
 
   const shoot = useCallback(async () => {
@@ -198,9 +209,9 @@ function CaptureInner() {
         <div className="flex w-full flex-col items-center gap-3">
           <button
             type="button"
-            onClick={camera === 'live' ? shoot : () => fileRef.current?.click()}
+            onClick={camera === 'live' ? shoot : () => cameraRef.current?.click()}
             disabled={busy}
-            aria-label={camera === 'live' ? 'Take photo' : 'Choose a photo'}
+            aria-label={camera === 'live' ? 'Take photo' : 'Take a photo'}
             className="flex size-[76px] items-center justify-center rounded-full border-[5px] border-brand-600 p-1 disabled:opacity-50"
           >
             <span className="flex size-14 items-center justify-center rounded-full border border-[#ededed] bg-white shadow-shutter">
@@ -211,8 +222,8 @@ function CaptureInner() {
           <p className="text-[11px] text-content-medium">
             {busy ? 'Reading your handwriting…' : (
               <>
-                <button type="button" onClick={() => fileRef.current?.click()} disabled={busy} className="font-semibold text-brand-600 underline">
-                  Choose a photo
+                <button type="button" onClick={() => libraryRef.current?.click()} disabled={busy} className="font-semibold text-brand-600 underline">
+                  Choose from library
                 </button>
                 {' · '}
                 <button type="button" onClick={useSample} disabled={busy} className="font-semibold text-brand-600 underline">
@@ -222,17 +233,19 @@ function CaptureInner() {
             )}
           </p>
 
+          {/* `capture` forces the camera and hides the photo library, so the two paths
+              need separate inputs: this one opens the camera... */}
           <input
-            ref={fileRef}
+            ref={cameraRef}
             type="file"
             accept="image/*"
             capture="environment"
             className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void upload(file, file.name);
-            }}
+            onChange={onPick}
           />
+          {/* ...and this one, with no `capture`, opens the OS picker so an existing
+              photo of a note can be re-used instead of writing a new one every test. */}
+          <input ref={libraryRef} type="file" accept="image/*" className="hidden" onChange={onPick} />
         </div>
 
         <ScanModePill active="photo" />
