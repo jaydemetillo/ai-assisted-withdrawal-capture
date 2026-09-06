@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type OverlayChip = {
   id: string;
@@ -11,19 +11,36 @@ export type OverlayChip = {
   needsReview: boolean;
 };
 
+/** Rendered label geometry, in pixels within the overlay box. */
+const LABEL_HEIGHT = 20;
+/** Minimum clear space between two labels. Below this they read as one smear. */
+const LABEL_GAP = 6;
+/** A label needs at least this much room beside the line, else it goes inside it. */
+const MIN_SIDE_ROOM = 78;
+
+type Placed = {
+  chip: OverlayChip;
+  box: { left: number; top: number; width: number; height: number };
+  label: { left: number; top: number; maxWidth: number; inside: boolean };
+};
+
 /**
- * Draws the photograph with each line the model read highlighted, and the item it
- * resolved to named beside it - the Google-Translate-over-a-menu effect.
+ * The photograph with each line the model read highlighted, and the item it resolved to
+ * named beside it - the Google-Translate-over-a-menu effect.
  *
- * Boxes arrive normalized to 0-1000 rather than in pixels, so they stay correct at any
- * rendered size.
+ * Two things make this harder than it looks, and both were got wrong first time round:
  *
- * Labels sit to the SIDE of their line, vertically centred, not stacked above it. Above
- * was the obvious placement and it was wrong: handwritten lines sit close together, so
- * every label landed on top of the line above it and the overlay turned into a pile of
- * overlapping bars. A written list is left-aligned with empty paper to its right, which
- * is exactly where a label can go without covering anything - and because each line
- * occupies its own vertical band, side labels cannot collide with each other either.
+ *  1. Handwritten lines sit close together, so a label placed above its line lands on
+ *     the line above it. Labels therefore sit BESIDE their line, on the empty paper a
+ *     left-aligned list leaves to its right.
+ *  2. Side placement alone is not enough. On a phone the photo renders a few hundred
+ *     pixels tall, so lines 60 units apart on the 0-1000 canvas end up ~13px apart -
+ *     closer than a label is tall, and they overlap anyway. So labels are laid out in
+ *     real pixels with a collision pass that keeps at least LABEL_GAP between them,
+ *     nudging each one down from its line rather than letting them pile up.
+ *
+ * That means measuring the rendered element, which is why this needs a ResizeObserver
+ * rather than pure percentage CSS.
  */
 export function OcrOverlay({
   src,
@@ -40,82 +57,140 @@ export function OcrOverlay({
   activeId?: string | null;
   onChipClick?: (id: string) => void;
 }) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [size, setSize] = useState<{ w: number; h: number; x: number; y: number } | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const positioned = chips.filter((c) => c.bbox);
+
+  /**
+   * Measure the PHOTO, not the box around it.
+   *
+   * The image is drawn with object-contain, so unless its aspect ratio happens to match
+   * the container it is letterboxed - centred with bars down the sides or along the top
+   * and bottom. Boxes are normalized against the photo, so mapping them to the container
+   * shifts and stretches every one of them; on a portrait note in a landscape frame the
+   * highlights miss the handwriting completely. This works out where the photo actually
+   * landed and maps into that rectangle instead.
+   */
+  const measure = useCallback(() => {
+    const host = hostRef.current;
+    const img = imgRef.current;
+    if (!host) return;
+    const cw = host.clientWidth;
+    const ch = host.clientHeight;
+    const nw = img?.naturalWidth ?? 0;
+    const nh = img?.naturalHeight ?? 0;
+    if (!nw || !nh) {
+      setSize({ w: cw, h: ch, x: 0, y: 0 });
+      return;
+    }
+    const scale = Math.min(cw / nw, ch / nh);
+    const w = nw * scale;
+    const h = nh * scale;
+    setSize({ w, h, x: (cw - w) / 2, y: (ch - h) / 2 });
+  }, []);
+
+  useEffect(() => {
+    measure();
+    const el = hostRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  let placed: Placed[] = [];
+  if (size && size.w > 0 && size.h > 0) {
+    const withBox = chips
+      .filter((c) => c.bbox)
+      .map((chip) => {
+        const [x0, y0, x1, y1] = chip.bbox!;
+        return {
+          chip,
+          box: {
+            left: size.x + (x0 / 1000) * size.w,
+            top: size.y + (y0 / 1000) * size.h,
+            width: ((x1 - x0) / 1000) * size.w,
+            height: ((y1 - y0) / 1000) * size.h,
+          },
+        };
+      })
+      // Top to bottom, so the collision pass only ever needs to look backwards.
+      .sort((a, b) => a.box.top - b.box.top);
+
+    let previousBottom = -Infinity;
+    placed = withBox.map(({ chip, box }) => {
+      const boxRight = box.left + box.width;
+      const roomToTheRight = size.x + size.w - boxRight - 8;
+      // Never place a label to the left: that is where the handwriting is.
+      const inside = roomToTheRight < MIN_SIDE_ROOM;
+
+      const idealTop = box.top + box.height / 2 - LABEL_HEIGHT / 2;
+      let top = Math.max(idealTop, previousBottom + LABEL_GAP);
+      // Keep the last few inside the frame rather than pushed off the bottom.
+      top = Math.min(top, Math.max(size.y, size.y + size.h - LABEL_HEIGHT));
+      previousBottom = top + LABEL_HEIGHT;
+
+      const left = inside ? box.left + 4 : boxRight + 8;
+      const maxWidth = Math.max(48, inside ? box.width - 8 : size.x + size.w - left - 6);
+
+      return { chip, box, label: { left, top, maxWidth, inside } };
+    });
+  }
 
   return (
-    <div className={`relative overflow-hidden rounded-2xl bg-[#121316] ${className}`}>
+    <div ref={hostRef} className={`relative overflow-hidden rounded-2xl bg-[#121316] ${className}`}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
+        ref={imgRef}
         src={src}
         alt="The photographed handwritten list"
         className="block h-full w-full object-contain"
-        onLoad={() => setLoaded(true)}
+        onLoad={() => {
+          setLoaded(true);
+          measure();
+        }}
       />
 
-      {loaded && showOverlay && (
+      {loaded && showOverlay && placed.length > 0 && (
         <div className="pointer-events-none absolute inset-0">
-          {positioned.map((chip) => {
-            const [x0, y0, x1, y1] = chip.bbox!;
-            const active = activeId === chip.id;
+          {/* Highlights, sitting directly on the handwriting. */}
+          {placed.map(({ chip, box }) => (
+            <div
+              key={`box-${chip.id}`}
+              className={`absolute rounded-[3px] border-2 transition-all ${
+                chip.needsReview ? 'border-warning bg-warning/25' : 'border-brand-600 bg-brand-600/20'
+              } ${activeId === chip.id ? 'ring-2 ring-white/80' : ''}`}
+              style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+            />
+          ))}
 
-            // How much empty paper is left of the image edge on this line, and how much
-            // of it the label may use. Percentages here resolve against the box, not the
-            // image, so the free space has to be converted into box-relative units -
-            // otherwise a short line gets a uselessly short label ("3 x Sur...").
-            const boxWidth = Math.max(1, (x1 - x0) / 10);
-            const freeRight = (1000 - x1) / 10;
-            // Under ~14% of the image left over is not enough for a readable label, so it
-            // goes inside the highlight instead. Never to the left: that is where the
-            // handwriting is.
-            const inside = freeRight < 14;
-            const maxWidth = inside
-              ? '94%'
-              : `${Math.max(40, ((freeRight - 2) / boxWidth) * 100)}%`;
-
-            return (
-              <div
-                key={chip.id}
-                className="absolute"
-                style={{
-                  left: `${x0 / 10}%`,
-                  top: `${y0 / 10}%`,
-                  width: `${(x1 - x0) / 10}%`,
-                  height: `${(y1 - y0) / 10}%`,
-                }}
-              >
-                {/* The highlight, sitting directly on the handwriting. */}
-                <div
-                  className={`absolute inset-0 rounded-[3px] border-2 transition-all ${
-                    chip.needsReview
-                      ? 'border-warning bg-warning/25'
-                      : 'border-brand-600 bg-brand-600/20'
-                  } ${active ? 'ring-2 ring-white/80' : ''}`}
-                />
-                {/* The read-out, beside the line rather than on top of its neighbour. */}
-                <button
-                  type="button"
-                  onClick={onChipClick ? () => onChipClick(chip.id) : undefined}
-                  title={chip.label}
-                  className={`
-                    pointer-events-auto absolute top-1/2 -translate-y-1/2 truncate rounded-md
-                    px-1.5 py-0.5 text-[10px] font-semibold shadow-md transition-transform hover:scale-105
-                    ${chip.needsReview ? 'bg-warning text-content-strong' : 'bg-brand-600 text-white'}
-                    ${active ? 'ring-2 ring-white/80' : ''}
-                  `}
-                  style={
-                    inside
-                      ? { right: 4, maxWidth }
-                      : { left: 'calc(100% + 6px)', maxWidth }
-                  }
-                >
-                  {chip.quantity > 0 ? `${chip.quantity} × ` : ''}
-                  {chip.label}
-                  {chip.needsReview ? ' ?' : ''}
-                </button>
-              </div>
-            );
-          })}
+          {/* Read-outs, spaced so they never touch each other. */}
+          {placed.map(({ chip, label }) => (
+            <button
+              key={`label-${chip.id}`}
+              type="button"
+              onClick={onChipClick ? () => onChipClick(chip.id) : undefined}
+              title={chip.label}
+              className={`
+                pointer-events-auto absolute truncate rounded-md px-1.5 text-[10px] font-semibold leading-none
+                shadow-md transition-transform hover:scale-105
+                ${chip.needsReview ? 'bg-warning text-content-strong' : 'bg-brand-600 text-white'}
+                ${activeId === chip.id ? 'ring-2 ring-white/80' : ''}
+              `}
+              style={{
+                left: label.left,
+                top: label.top,
+                maxWidth: label.maxWidth,
+                height: LABEL_HEIGHT,
+                lineHeight: `${LABEL_HEIGHT}px`,
+              }}
+            >
+              {chip.quantity > 0 ? `${chip.quantity} × ` : ''}
+              {chip.label}
+              {chip.needsReview ? ' ?' : ''}
+            </button>
+          ))}
         </div>
       )}
     </div>

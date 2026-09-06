@@ -173,10 +173,10 @@
   }
   .ov .box.q { border-color: var(--warn); background: rgba(244,195,68,.22); }
   .ov .tag {
-    position: absolute; top: 50%; transform: translateY(-50%);
+    position: absolute; height: 20px; line-height: 20px;
     overflow: hidden; text-overflow: ellipsis;
     background: var(--brand); color: #fff; font-size: 10px; font-weight: 600;
-    padding: 2px 6px; border-radius: 5px; white-space: nowrap;
+    padding: 0 6px; border-radius: 5px; white-space: nowrap;
     font-family: "Nata Sans", sans-serif; box-shadow: 0 2px 6px rgba(0,0,0,.25);
   }
   .ov .tag.q { background: var(--warn); color: #4a3708; }
@@ -517,34 +517,67 @@
   /* ================= Phone ================= */
   const STEPS = ["home", "reason", "capture", "review", "done"];
 
-  /* Labels sit BESIDE their line, not stacked above it. Above was the obvious
-     placement and it was wrong: handwritten lines sit close together, so every label
-     landed on the line above and the overlay became a pile of overlapping bars. A
-     written list has empty paper to its right, which is where a label belongs. */
-  function overlay(rows) {
-    return `<div class="ov">${rows.filter(r => r.bbox).map(r => {
+  /* Overlay geometry, the two parts that are easy to get wrong:
+     1. The photo is drawn with object-contain, so it is letterboxed inside its box.
+        Boxes are normalized against the PHOTO, so mapping them to the container shifts
+        and stretches them - on a portrait note in a landscape frame they miss the
+        handwriting entirely. Measure where the photo actually landed and map into that.
+     2. Handwritten lines sit close together, so labels beside them still collide once
+        the photo renders small. Lay them out in real pixels and keep LABEL_GAP between. */
+  const LABEL_H = 20, LABEL_GAP = 6, MIN_SIDE_ROOM = 78;
+
+  function layoutOverlay() {
+    const shot = document.querySelector("#screen .shot");
+    const ov = shot && shot.querySelector(".ov");
+    if (!ov) return;
+    const rows = (S.overlayRows || []).filter(r => r.bbox);
+    if (!rows.length) { ov.innerHTML = ""; return; }
+
+    const cw = shot.clientWidth, ch = shot.clientHeight;
+    const img = shot.querySelector("img");
+    let W = cw, H = ch, X = 0, Y = 0;
+    if (img && img.naturalWidth && img.naturalHeight) {
+      const s = Math.min(cw / img.naturalWidth, ch / img.naturalHeight);
+      W = img.naturalWidth * s; H = img.naturalHeight * s;
+      X = (cw - W) / 2; Y = (ch - H) / 2;
+    }
+
+    let prevBottom = -1e9, html = "";
+    rows.map(r => {
       const [x0, y0, x1, y1] = r.bbox;
       const it = r.sku ? BY_SKU.get(r.sku) : null;
-      const q = r.flag ? "q" : "";
-      // Percentages inside the box resolve against the box, so the paper still free to
-      // the right has to be converted into box-relative units before it can cap the label.
-      const boxW = Math.max(1, (x1 - x0) / 10);
-      const freeRight = (1000 - x1) / 10;
-      const inside = freeRight < 14;
-      const maxW = inside ? 94 : Math.max(40, ((freeRight - 2) / boxW) * 100);
-      const place = inside ? "right:4px" : "left:calc(100% + 6px)";
-      const label = `${r.qty > 0 ? r.qty + " × " : ""}${esc(it ? it.name : r.guess)}${r.flag ? " ?" : ""}`;
-      return `<div class="box ${q}" style="left:${x0/10}%;top:${y0/10}%;width:${(x1-x0)/10}%;height:${(y1-y0)/10}%">
-        <span class="tag ${q}" style="${place};max-width:${maxW}%">${label}</span></div>`;
-    }).join("")}</div>`;
+      return {
+        flag: r.flag,
+        text: `${r.qty > 0 ? r.qty + " × " : ""}${esc(it ? it.name : r.guess)}${r.flag ? " ?" : ""}`,
+        left: X + x0 / 1000 * W, top: Y + y0 / 1000 * H,
+        width: (x1 - x0) / 1000 * W, height: (y1 - y0) / 1000 * H
+      };
+    })
+    .sort((a, b) => a.top - b.top)   // top-down, so collisions only look backwards
+    .forEach(b => {
+      const right = b.left + b.width;
+      // Never to the left - that is where the handwriting is.
+      const inside = (X + W - right - 8) < MIN_SIDE_ROOM;
+      let top = Math.max(b.top + b.height / 2 - LABEL_H / 2, prevBottom + LABEL_GAP);
+      top = Math.min(top, Math.max(Y, Y + H - LABEL_H));
+      prevBottom = top + LABEL_H;
+      const left = inside ? b.left + 4 : right + 8;
+      const maxW = Math.max(48, inside ? b.width - 8 : X + W - left - 6);
+      const q = b.flag ? "q" : "";
+      html += `<div class="box ${q}" style="left:${b.left}px;top:${b.top}px;width:${b.width}px;height:${b.height}px"></div>`;
+      html += `<span class="tag ${q}" style="left:${left}px;top:${top}px;max-width:${maxW}px">${b.text}</span>`;
+    });
+    ov.innerHTML = html;
   }
 
-  function paper() {
-    return `<div class="paper">${SAMPLE.ink.map(l => `<span style="left:${l.x}%;top:${l.y}%">${esc(l.t)}</span>`).join("")}</div>`;
-  }
+  window.addEventListener("resize", layoutOverlay);
+
   function shotHTML(rows) {
-    const inner = S.photoURL ? `<img src="${S.photoURL}" alt="The list you photographed">` : paper();
-    return `<div class="shot">${inner}${rows ? overlay(rows) : ""}</div>`;
+    S.overlayRows = rows || [];
+    const inner = S.photoURL
+      ? `<img src="${S.photoURL}" alt="The list you photographed" onload="window.__pulseLayout&&window.__pulseLayout()">`
+      : paper();
+    return `<div class="shot">${inner}<div class="ov"></div></div>`;
   }
 
   function paintPhone() {
@@ -628,6 +661,7 @@
       if (cam) cam.onchange = pick;
       if (lib) lib.onchange = pick;
       $("go").onclick = () => read(S.file);
+      requestAnimationFrame(layoutOverlay);
       return;
     }
 
@@ -687,6 +721,7 @@
         el.querySelector('[data-f="inc"]').onclick = () => { row.qty += 1; touch(); };
       });
       $("go").onclick = submit;
+      requestAnimationFrame(layoutOverlay);
       return;
     }
 
@@ -815,6 +850,7 @@
     $("evidence").showModal();
   }
 
+  window.__pulseLayout = layoutOverlay;
   paintPhone(); paintConsole();
   boot();
 })();
