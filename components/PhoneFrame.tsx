@@ -5,15 +5,22 @@ import { Icon } from '@/components/Icon';
  * On a phone the app fills the screen. On a desktop browser it is drawn inside a 390x844
  * device shell so the mobile flow can be demoed and reviewed without a phone - which is
  * how most people will first see this.
+ *
+ * On a phone the shell is FIXED to the viewport rather than sized with `h-dvh`. A
+ * 100dvh-tall element still leaves the document scrollable on iOS: the toolbar collapses
+ * as you scroll and the page rubber-bands, so you can drag the whole app up and reveal
+ * empty space under it. Taking the shell out of flow entirely leaves the document with
+ * no height to scroll, and only the inner content scrolls - which is how a native screen
+ * behaves.
  */
 export function PhoneFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-dvh w-full bg-canvas-alt md:flex md:items-center md:justify-center md:py-8">
+    <div className="bg-canvas-alt md:flex md:min-h-dvh md:items-center md:justify-center md:py-8">
       <div
         className="
-          relative flex h-dvh w-full flex-col overflow-hidden bg-canvas-alt
-          md:h-[844px] md:w-[390px] md:rounded-4xl md:border md:border-divider-strong md:shadow-2xl
-          md:[--safe-b:0px]
+          fixed inset-0 flex flex-col overflow-hidden bg-canvas-alt
+          md:relative md:inset-auto md:h-[844px] md:w-[390px] md:rounded-4xl
+          md:border md:border-divider-strong md:shadow-2xl md:[--safe-b:0px]
         "
       >
         {children}

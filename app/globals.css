@@ -21,6 +21,9 @@ body {
   background: var(--canvas-alt);
   color: var(--content-strong);
   -webkit-font-smoothing: antialiased;
+  /* Stop the whole page rubber-banding on iOS. Scrolling belongs to the panes inside
+     the app shell, not to the document. */
+  overscroll-behavior-y: none;
 }
 
 /* Hide the scrollbar inside the simulated phone viewport without losing scroll. */
