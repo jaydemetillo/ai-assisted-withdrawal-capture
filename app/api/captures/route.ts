@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { currentUser, defaultStoreroom } from '@/lib/session';
-import { savePhoto } from '@/lib/storage';
+import { storeCapturePhoto } from '@/lib/storage';
 import { loadCatalogue, resolveLines, runOcr } from '@/lib/ocr';
 import { isReason, type Action } from '@/lib/constants';
 
@@ -21,6 +21,7 @@ export async function POST(request: Request) {
     const photo = form.get('photo');
     const reason = form.get('reason');
     const mockSlug = form.get('sample');
+    const thumbnail = form.get('thumbnail');
 
     if (!(photo instanceof File)) {
       return NextResponse.json({ error: 'A photo is required' }, { status: 400 });
@@ -53,7 +54,11 @@ export async function POST(request: Request) {
     );
 
     const resolved = resolveLines(outcome.result.lines, catalogue);
-    const photoPath = await savePhoto(buffer, mediaType);
+    const photoPath = await storeCapturePhoto(
+      buffer,
+      mediaType,
+      typeof thumbnail === 'string' ? thumbnail : null,
+    );
 
     // "unknown" is a real answer from the model, not a failure - the review screen asks
     // the user to pick. We default the toggle to WITHDRAW as the common case.

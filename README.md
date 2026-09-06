@@ -33,50 +33,55 @@ fixture is never mistaken for a real read. Set the key to read actual handwritin
 
 ---
 
-## Testing it on a phone (no sign-in, no database)
+## Deploying it (free, and the phone updates the desktop)
 
-If you just need the thing on a phone to try or demo, this is the shortest path. It needs
-**one environment variable and nothing else** - no database, no file storage, no login.
+Import the repo at **vercel.com** (Add New -> Project -> pick the repo -> Import), then
+add one thing before deploying:
 
-```bash
-npm install
-npx vercel            # sign in with GitHub, accept the defaults
-```
+**Storage -> Create Database -> Neon (Postgres)**, on the Free plan. That is the whole
+setup. Neon's free tier needs no credit card, and attaching it sets `DATABASE_URL` for
+you. On the first deploy the build creates the tables and seeds the catalogue by itself -
+nothing to run locally.
 
-Then in the Vercel dashboard: **Project Settings -> Environment Variables**, add
-`ANTHROPIC_API_KEY`, and redeploy. Open the deployment URL on any phone:
+Then:
 
-```
-https://your-app.vercel.app/demo.html
-```
+- phone: `https://your-app.vercel.app`
+- desktop: `https://your-app.vercel.app/admin`
 
-You get the full flow - photograph a list you wrote by hand, watch it get read, fix
-anything it flagged, submit, and see the stock number move in the console beside it.
-Anyone with the link can open it; there is no account and no sign-in.
+Submit a list on the phone and it is in the desktop table on the next load, with the
+photo attached. **One database, both surfaces** - which is the point of the thing.
 
-**What this mode gives up:** everything is kept in that browser's own storage, so the
-phone and a laptop each have their own copy rather than one shared record. That is the
-only thing missing - the reading, the review gate, the refusal to guess and the derived
-stock maths are all the real code. For one shared record across devices, add a database
-and use the full app (below).
+No API key is needed. Without one it reads a built-in sample note instead of your photo
+and says "Demo reading" on screen; everything else - the review gate, the amber flagging,
+the stock arithmetic, the admin corrections - is the real code. Add `ANTHROPIC_API_KEY` in
+Project Settings later to have it read your actual handwriting (a few cents per photo).
 
-Without an API key the page still runs end to end, but it reads a built-in sample note
-instead of your photo and says so on screen.
+### Why only a database, and no file storage
 
-`/` and `/admin` redirect to `/demo.html` whenever no usable database is configured, so a
-key-only deployment never lands anyone on a broken page.
+A serverless host gives every request its own disposable disk, so a photo written during
+an upload is gone by the time the review screen asks for it. Rather than make you
+provision an object store too, the browser makes a small thumbnail before uploading and
+that is what gets kept as the evidence image. The full-resolution photo is still what
+gets read - it just isn't stored. Attach a Vercel Blob store and full images are used
+instead, automatically.
 
-### Or: no accounts at all
+### The no-database version
 
-Run it on your laptop and open it from your phone on the same Wi-Fi:
+If you skip the Neon step entirely, the deploy still works and `/` and `/admin` redirect
+to `/demo.html` - a self-contained build that keeps everything in that browser's own
+storage. The full flow runs, but the phone and a laptop each have their own copy rather
+than one shared record. It exists so a key-only or nothing-at-all deployment never lands
+anyone on a broken page.
+
+### Or run it on your own laptop
 
 ```bash
 npm run setup
 npm run dev:https
 ```
 
-Then browse to `https://<your-laptop-ip>:3000/demo.html` and accept the certificate
-warning once. Works offline, costs nothing, needs no Vercel account.
+Then browse to `https://<your-laptop-ip>:3000` from your phone on the same Wi-Fi and
+accept the certificate warning once. No accounts anywhere.
 
 ---
 

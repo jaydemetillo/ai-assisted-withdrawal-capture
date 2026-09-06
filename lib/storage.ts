@@ -28,6 +28,14 @@ export function usingBlobStorage(): boolean {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 
+/**
+ * Serverless hosts give each instance its own disposable disk, so a photo written
+ * during the upload request is gone by the time the review screen asks for it.
+ */
+export function hasWritableDisk(): boolean {
+  return !(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+}
+
 export function extensionFor(mediaType: string): string {
   return EXTENSIONS[mediaType] ?? 'bin';
 }
@@ -37,6 +45,34 @@ export function mediaTypeFor(filename: string): string {
   if (ext === 'jpeg') return 'image/jpeg';
   const found = Object.entries(EXTENSIONS).find(([, value]) => value === ext);
   return found ? found[0] : 'application/octet-stream';
+}
+
+/**
+ * Store the capture photo and return whatever the database should remember about it.
+ *
+ * Three homes, in order of preference:
+ *  - Vercel Blob, when a token is configured;
+ *  - local disk, when there is one worth writing to;
+ *  - the small thumbnail the browser already made, inlined as a data URL.
+ *
+ * That last case is what lets the whole app run on a serverless host with a database
+ * and nothing else - no object store to provision. The full-resolution photo is still
+ * what gets read; only the thumbnail is kept, which is all the evidence view shows.
+ */
+export async function storeCapturePhoto(
+  buffer: Buffer,
+  mediaType: string,
+  thumbnail: string | null,
+): Promise<string> {
+  if (usingBlobStorage() || hasWritableDisk()) {
+    return savePhoto(buffer, mediaType);
+  }
+  if (thumbnail && thumbnail.startsWith('data:image/')) {
+    return thumbnail;
+  }
+  // No store and no thumbnail: keep the transaction, lose the picture. Better than
+  // failing the whole capture over an image.
+  return '';
 }
 
 export async function savePhoto(buffer: Buffer, mediaType: string): Promise<string> {
@@ -66,6 +102,8 @@ export async function readPhoto(name: string): Promise<Buffer> {
 }
 
 export function photoUrl(stored: string): string {
+  if (!stored) return '';
+  if (stored.startsWith('data:')) return stored;
   if (stored.startsWith('http://') || stored.startsWith('https://')) return stored;
   return `/api/uploads/${encodeURIComponent(stored)}`;
 }

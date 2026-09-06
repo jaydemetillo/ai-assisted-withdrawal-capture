@@ -8,6 +8,31 @@ import { ScanModePill } from '@/components/ScanModePill';
 import { Icon } from '@/components/Icon';
 import { isReason } from '@/lib/constants';
 
+/**
+ * A small JPEG of the shot, made in the browser.
+ *
+ * When the app runs somewhere with no file storage, this thumbnail is what gets kept as
+ * the evidence image - so the capture flow works with a database and nothing else. The
+ * full-resolution photo is still what the model reads; it just isn't stored.
+ */
+async function makeThumbnail(blob: Blob): Promise<string | null> {
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const width = 420;
+    const height = Math.max(1, Math.round((bitmap.height * width) / bitmap.width));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+    const url = canvas.toDataURL('image/jpeg', 0.6);
+    // Guard against a runaway data URL ending up in a database row.
+    return url.length < 260_000 ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 type CameraState = 'idle' | 'starting' | 'live' | 'denied' | 'unavailable';
 
 /** "Capture List" - Figma node 8792:28616. */
@@ -72,10 +97,13 @@ function CaptureInner() {
       setBusy(true);
       setError(null);
       try {
+        const thumbnail = await makeThumbnail(blob);
+
         const form = new FormData();
         form.append('photo', new File([blob], filename, { type: blob.type || 'image/jpeg' }));
         form.append('reason', reason);
         if (sample) form.append('sample', sample);
+        if (thumbnail) form.append('thumbnail', thumbnail);
 
         const response = await fetch('/api/captures', { method: 'POST', body: form });
         const data = (await response.json()) as { id?: string; error?: string };
