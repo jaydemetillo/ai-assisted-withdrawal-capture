@@ -22,13 +22,46 @@ if (!isRemote) {
   process.exit(0);
 }
 
-function run(args: string[]) {
-  execFileSync('npx', args, { stdio: 'inherit' });
+/**
+ * Schema changes need a DIRECT connection, not a pooled one.
+ *
+ * Neon's Vercel integration points DATABASE_URL at the pooled endpoint, which is right
+ * for a serverless app - many short-lived connections - but wrong for DDL: `prisma db
+ * push` through a transaction-mode pooler fails. The integration also provides the
+ * direct endpoint alongside it, under one of these names depending on which integration
+ * added it, so prefer that for the push and leave the app on the pooled URL.
+ */
+function directUrl(): string {
+  const candidates = [
+    process.env.DATABASE_URL_UNPOOLED,
+    process.env.POSTGRES_URL_NON_POOLING,
+    process.env.DIRECT_DATABASE_URL,
+  ];
+  return candidates.find((value) => value && value.startsWith('postgres')) ?? url;
+}
+
+function run(args: string[], env?: Record<string, string>) {
+  execFileSync('npx', args, { stdio: 'inherit', env: { ...process.env, ...env } });
 }
 
 async function main() {
-  console.log('[db] pushing schema to the deployed database');
-  run(['prisma', 'db', 'push', '--skip-generate', '--accept-data-loss']);
+  const direct = directUrl();
+  console.log(
+    `[db] pushing schema (using the ${direct === url ? 'configured' : 'direct, unpooled'} connection)`,
+  );
+  try {
+    run(['prisma', 'db', 'push', '--skip-generate', '--accept-data-loss'], { DATABASE_URL: direct });
+  } catch (error) {
+    console.error(
+      '\n[db] Could not apply the schema.\n' +
+        '     Most often this is DATABASE_URL pointing at a POOLED connection, which\n' +
+        '     cannot run schema changes. Neon and Vercel Postgres also expose a direct\n' +
+        '     one - DATABASE_URL_UNPOOLED or POSTGRES_URL_NON_POOLING - and this script\n' +
+        '     uses it automatically when present. Check that variable exists on the\n' +
+        '     deployment, and that the database is reachable from the build.\n',
+    );
+    throw error;
+  }
 
   const prisma = new PrismaClient();
   try {
@@ -41,8 +74,10 @@ async function main() {
   } finally {
     await prisma.$disconnect().catch(() => undefined);
   }
-  // Seeding opens its own client, so disconnect before handing over.
-  run(['tsx', 'prisma/seed.ts']);
+  // Seeding opens its own client, so disconnect before handing over. It writes rows
+  // rather than DDL, so the pooled connection is fine - but the direct one is fine too
+  // and keeps this consistent with the push above.
+  run(['tsx', 'prisma/seed.ts'], { DATABASE_URL: direct });
 }
 
 main().catch((error) => {
