@@ -33,6 +33,53 @@ fixture is never mistaken for a real read. Set the key to read actual handwritin
 
 ---
 
+## Testing it on a phone (no sign-in, no database)
+
+If you just need the thing on a phone to try or demo, this is the shortest path. It needs
+**one environment variable and nothing else** - no database, no file storage, no login.
+
+```bash
+npm install
+npx vercel            # sign in with GitHub, accept the defaults
+```
+
+Then in the Vercel dashboard: **Project Settings -> Environment Variables**, add
+`ANTHROPIC_API_KEY`, and redeploy. Open the deployment URL on any phone:
+
+```
+https://your-app.vercel.app/demo.html
+```
+
+You get the full flow - photograph a list you wrote by hand, watch it get read, fix
+anything it flagged, submit, and see the stock number move in the console beside it.
+Anyone with the link can open it; there is no account and no sign-in.
+
+**What this mode gives up:** everything is kept in that browser's own storage, so the
+phone and a laptop each have their own copy rather than one shared record. That is the
+only thing missing - the reading, the review gate, the refusal to guess and the derived
+stock maths are all the real code. For one shared record across devices, add a database
+and use the full app (below).
+
+Without an API key the page still runs end to end, but it reads a built-in sample note
+instead of your photo and says so on screen.
+
+`/` and `/admin` redirect to `/demo.html` whenever no usable database is configured, so a
+key-only deployment never lands anyone on a broken page.
+
+### Or: no accounts at all
+
+Run it on your laptop and open it from your phone on the same Wi-Fi:
+
+```bash
+npm run setup
+npm run dev:https
+```
+
+Then browse to `https://<your-laptop-ip>:3000/demo.html` and accept the certificate
+warning once. Works offline, costs nothing, needs no Vercel account.
+
+---
+
 ## How your phone and the desktop console talk to each other
 
 They are not separate applications. It is **one Next.js app with one database**: the phone

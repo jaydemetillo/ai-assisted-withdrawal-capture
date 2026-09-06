@@ -1,5 +1,7 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { prisma } from '@/lib/db';
+import { hasUsableDatabase } from '@/lib/deployment';
 import { currentUser, defaultStoreroom } from '@/lib/session';
 import { StatusBar } from '@/components/PhoneFrame';
 import { BottomTabBar } from '@/components/BottomTabBar';
@@ -20,6 +22,9 @@ function daysUntil(date: Date): number {
 
 /** Mobile home - Figma node 8791:34509. */
 export default async function MobileHome() {
+  // Deployed with only an API key and no database: the standalone demo is the app.
+  if (!hasUsableDatabase()) redirect('/demo.html');
+
   const [user, storeroom] = await Promise.all([currentUser(), defaultStoreroom()]);
 
   const levels = await prisma.stockLevel.findMany({
