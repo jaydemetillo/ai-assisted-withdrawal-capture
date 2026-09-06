@@ -290,19 +290,36 @@ function CaptureInner() {
             </span>
           </button>
 
-          <p className="text-[11px] text-content-medium">
-            {busy ? 'Reading your handwriting…' : (
-              <>
-                <button type="button" onClick={() => libraryRef.current?.click()} disabled={busy} className="font-semibold text-brand-600 underline">
-                  Choose from library
-                </button>
-                {' · '}
-                <button type="button" onClick={useSample} disabled={busy} className="font-semibold text-brand-600 underline">
-                  Use a sample note
-                </button>
-              </>
-            )}
-          </p>
+          {/* Two equally reachable routes. The library one used to be a small underlined
+              link next to the shutter and people simply did not see it - they tapped the
+              obvious control, got the camera, and concluded the library was unavailable. */}
+          <div className="flex w-full flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => libraryRef.current?.click()}
+              disabled={busy}
+              className="w-full rounded-full border border-brand-600 bg-white py-3 text-sm font-semibold text-brand-600 disabled:opacity-50"
+            >
+              Choose from photo library
+            </button>
+            <p className="text-center text-[11px] text-content-medium">
+              {busy ? (
+                'Reading your handwriting…'
+              ) : (
+                <>
+                  Already photographed your note? Pick it above.{' '}
+                  <button
+                    type="button"
+                    onClick={useSample}
+                    disabled={busy}
+                    className="font-semibold text-brand-600 underline"
+                  >
+                    Use a sample note
+                  </button>
+                </>
+              )}
+            </p>
+          </div>
 
           {/* `capture` forces the camera and hides the photo library, so the two paths
               need separate inputs: this one opens the camera... */}
