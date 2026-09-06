@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand-50: #faf0fb;
+  --brand-600: #9c2fa7;
+  --brand-900: #5a1b61;
+  --canvas-alt: #f8f9f9;
+  --content-strong: #2c2e34;
+  --content-medium: #666c7a;
+  --divider-medium: #ededed;
+}
+
+html,
+body {
+  background: var(--canvas-alt);
+  color: var(--content-strong);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Hide the scrollbar inside the simulated phone viewport without losing scroll. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes scanSweep {
+  0%,
+  100% {
+    transform: translateY(-96px);
+    opacity: 0.25;
+  }
+  50% {
+    transform: translateY(96px);
+    opacity: 1;
+  }
+}
+.animate-scan-sweep {
+  animation: scanSweep 2.6s ease-in-out infinite;
+}

@@ -1,0 +1,46 @@
+{
+  "$comment": "Ground truth for the generated handwriting fixtures. `npm run ocr:check` runs the real claude-opus-5 vision pipeline over each PNG and asserts against this. Item slugs must match prisma/seed.ts.",
+  "notes": [
+    {
+      "file": "withdraw-basic.png",
+      "description": "The canonical case: clean handwriting, 'Nx Item' format, explicit Withdrawn keyword.",
+      "expectedAction": "withdraw",
+      "expectedLines": [
+        { "sku": "MASK-L2", "quantity": 3 },
+        { "sku": "SYR-10ML", "quantity": 4 },
+        { "sku": "SAL-09-500", "quantity": 5 }
+      ]
+    },
+    {
+      "file": "dispose-expired.png",
+      "description": "Disposal wording plus 'expired batch' context; different handwriting face and 'N x Item' spacing.",
+      "expectedAction": "dispose",
+      "expectedLines": [
+        { "sku": "GAUZE-10", "quantity": 12 },
+        { "sku": "ETCO2-AD", "quantity": 2 },
+        { "sku": "SWAB-ALC", "quantity": 6 }
+      ]
+    },
+    {
+      "file": "messy-mixed.png",
+      "description": "Mixed quantity formats (trailing x2, dash, dot leaders), an abbreviation (NS = normal saline), and a unit word ('boxes') that must not be read as a quantity.",
+      "expectedAction": "withdraw",
+      "expectedLines": [
+        { "sku": "GLOVE-NIT-M", "quantity": 2 },
+        { "sku": "SYR-10ML", "quantity": 8 },
+        { "sku": "SAL-09-500", "quantity": 3 },
+        { "sku": "ECG-ELEC", "quantity": 10 }
+      ]
+    },
+    {
+      "file": "low-confidence.png",
+      "description": "Heavy abbreviation and one genuinely unreadable quantity ('??'). The third line MUST come back needing review rather than being guessed - this is the case the review screen exists for.",
+      "expectedAction": "withdraw",
+      "expectedLines": [
+        { "sku": "THERM-COVER", "quantity": 4 },
+        { "sku": "FOLEY-16", "quantity": 2 },
+        { "sku": "BIOHAZ-BAG", "quantity": null, "needsReview": true }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  initials  String
+  role      String   @default("staff") // staff | admin
+  createdAt DateTime @default(now())
+
+  captures     Capture[]
+  transactions Transaction[]
+}
+
+model Storeroom {
+  id       String @id @default(cuid())
+  code     String @unique // "S15"
+  name     String // "S15 Medical"
+  ward     String
+  hospital String
+
+  stockLevels  StockLevel[]
+  captures     Capture[]
+  transactions Transaction[]
+}
+
+model Item {
+  id          String    @id @default(cuid())
+  sku         String    @unique
+  name        String
+  category    String
+  unit        String    @default("unit")
+  description String    @default("")
+  imageUrl    String    @default("")
+  expiryDate  DateTime?
+
+  /// JSON string[] of alternate spellings a nurse might scribble ("masks", "face mask").
+  /// This is what makes "3x Masks" resolve to "Surgical Mask (Level 2)".
+  aliases String @default("[]")
+
+  stockLevels  StockLevel[]
+  lines        TransactionLine[]
+  captureLines CaptureLine[]
+}
+
+model StockLevel {
+  id          String @id @default(cuid())
+  itemId      String
+  storeroomId String
+
+  /// The count this storeroom started the ledger with. Current stock is always
+  /// derived as openingQuantity + sum(committed line deltas) - never patched in place.
+  openingQuantity Int @default(0)
+
+  /// Cached derived value, rewritten by recomputeStock(). Read this; never trust a
+  /// hand-applied increment.
+  quantity Int @default(0)
+
+  /// Below this, the item shows as low stock on the mobile home screen.
+  reorderLevel Int @default(0)
+
+  item      Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  storeroom Storeroom @relation(fields: [storeroomId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, storeroomId])
+}
+
+/// One photograph of a handwritten list, plus whatever the OCR pass made of it.
+/// Stays DRAFT (and moves no stock) until the user confirms it on the review screen.
+model Capture {
+  id          String   @id @default(cuid())
+  photoPath   String
+  reason      String // EMERGENCY | FORGOT_TO_RECORD
+  action      String // WITHDRAW | DISPOSE  (inferred from the note, user-overridable)
+  status      String   @default("DRAFT") // DRAFT | COMMITTED | VOID
+  storeroomId String
+  userId      String
+  createdAt   DateTime @default(now())
+
+  /// Raw provider response, kept verbatim for the evidence modal and for debugging
+  /// a bad read without re-running the model.
+  ocrRaw String @default("{}")
+
+  /// "claude" | "mock" - so the UI can be honest about which produced a reading.
+  ocrProvider String @default("mock")
+  ocrModel    String @default("")
+
+  storeroom   Storeroom     @relation(fields: [storeroomId], references: [id])
+  user        User          @relation(fields: [userId], references: [id])
+  lines       CaptureLine[]
+  transaction Transaction?
+}
+
+/// A single parsed row of the note, before it is committed.
+model CaptureLine {
+  id        String @id @default(cuid())
+  captureId String
+
+  rawText   String
+  itemId    String?
+  itemGuess String  @default("")
+  quantity  Int     @default(0)
+
+  confidence  Float   @default(0)
+  needsReview Boolean @default(false)
+  /// JSON [x0,y0,x1,y1] normalized 0-1000, for the overlay chips on the photo.
+  bbox        String  @default("null")
+  matchSource String  @default("MODEL") // MODEL | FUZZY | MANUAL | NONE
+
+  capture Capture @relation(fields: [captureId], references: [id], onDelete: Cascade)
+  item    Item?   @relation(fields: [itemId], references: [id])
+
+  @@index([captureId])
+}
+
+/// A committed stock movement. This plus TransactionLine is the ledger of record.
+model Transaction {
+  id          String   @id @default(cuid())
+  reference   String   @unique
+  action      String // WITHDRAW | DISPOSE
+  storeroomId String
+  userId      String
+  captureId   String?  @unique
+  reason      String   @default("")
+  remarks     String   @default("")
+  voided      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  storeroom Storeroom         @relation(fields: [storeroomId], references: [id])
+  user      User              @relation(fields: [userId], references: [id])
+  capture   Capture?          @relation(fields: [captureId], references: [id])
+  lines     TransactionLine[]
+}
+
+model TransactionLine {
+  id            String @id @default(cuid())
+  transactionId String
+  itemId        String
+
+  /// Magnitude as written on the note (always positive).
+  quantity Int
+  /// Signed effect on stock. Negative for both WITHDRAW and DISPOSE.
+  delta    Int
+
+  rawText     String @default("")
+  confidence  Float  @default(1)
+  bbox        String @default("null")
+  matchStatus String @default("AUTO") // AUTO | CORRECTED | MANUAL
+  remarks     String @default("")
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  item        Item        @relation(fields: [itemId], references: [id])
+
+  @@index([transactionId])
+  @@index([itemId])
+}

@@ -1,0 +1,8 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="114" height="121" viewBox="0 0 114 121" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="concentric-donut">
+<circle id="track" cx="57" cy="61" r="55" fill="#9C2FA7"/>
+<path id="low" d="M112 61C112 70.6545 109.459 80.1389 104.631 88.5C99.8041 96.8611 92.8611 103.804 84.5 108.631L76.25 94.342C82.1027 90.9629 86.9629 86.1027 90.342 80.25C93.7211 74.3973 95.5 67.7582 95.5 61L112 61Z" fill="#FFDA68"/>
+<path id="exp" d="M84.5 108.631C77.5447 112.647 69.7943 115.091 61.7936 115.791C53.7928 116.491 45.7358 115.43 38.1889 112.683L43.8322 97.1782C49.1151 99.101 54.755 99.8435 60.3555 99.3535C65.956 98.8635 71.3813 97.1529 76.25 94.342L84.5 108.631Z" fill="#EE8080"/>
+<circle id="inner-bg" cx="57" cy="61" r="41" fill="white"/>
+</g>
+</svg>

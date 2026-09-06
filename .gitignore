@@ -1,0 +1,16 @@
+node_modules/
+.next/
+out/
+build/
+.data/
+*.db
+*.db-journal
+prisma/dev.db*
+.env
+.env.local
+.DS_Store
+next-env.d.ts
+certificates/
+coverage/
+tsconfig.tsbuildinfo
+.fixture-build/
