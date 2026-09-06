@@ -56,6 +56,31 @@ and says "Demo reading" on screen; everything else - the review gate, the amber 
 the stock arithmetic, the admin corrections - is the real code. Add `ANTHROPIC_API_KEY` in
 Project Settings later to have it read your actual handwriting (a few cents per photo).
 
+### If pushes don't seem to deploy
+
+Two things account for almost every "Vercel isn't updating" case here.
+
+**The production branch.** Vercel picks one when the project is imported and then keeps
+it. If it is tracking a branch you are no longer pushing to, your pushes become preview
+deployments (different URLs) and the production URL never changes. Fix it under
+**Settings -> Environments -> Production -> Branch Tracking** (older projects:
+**Settings -> Git -> Production Branch**), then redeploy. Deploying from `main` avoids
+this entirely, which is why `main` exists in this repo.
+
+**A failed build leaves the old one live.** Check the Deployments tab for red builds
+before assuming nothing happened. The usual cause here was the pooled database
+connection - see below.
+
+### Why the build uses a different database URL than the app
+
+Neon and Vercel Postgres set `DATABASE_URL` to a *pooled* endpoint. That is the right
+choice for a serverless app making many short-lived connections, but schema changes
+cannot run through a transaction-mode pooler, so `prisma db push` fails and takes the
+build down with it. Both integrations also expose the direct endpoint
+(`DATABASE_URL_UNPOOLED` or `POSTGRES_URL_NON_POOLING`); `scripts/prepare-db.ts` uses
+whichever is present for the push and the seed, and leaves the running app on the pooled
+URL.
+
 ### Why only a database, and no file storage
 
 A serverless host gives every request its own disposable disk, so a photo written during
