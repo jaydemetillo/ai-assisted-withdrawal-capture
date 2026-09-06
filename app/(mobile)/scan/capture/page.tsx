@@ -47,6 +47,7 @@ function CaptureInner() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [camera, setCamera] = useState<CameraState>('idle');
+  const [readingLive, setReadingLive] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,6 +92,22 @@ function CaptureInner() {
     void startCamera();
     return stopCamera;
   }, [startCamera, stopCamera]);
+
+  // Tell people the photo won't be read BEFORE they bother taking one.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/read')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((info: { live?: boolean } | null) => {
+        if (!cancelled) setReadingLive(Boolean(info?.live));
+      })
+      .catch(() => {
+        if (!cancelled) setReadingLive(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const upload = useCallback(
     async (blob: Blob, filename: string, sample?: string) => {
@@ -144,6 +161,13 @@ function CaptureInner() {
       <ScreenHeader title="Capture List" onBack={() => { stopCamera(); router.push('/scan'); }} />
 
       <div className="flex flex-1 flex-col items-center justify-between px-6 pb-6 pt-4">
+        {readingLive === false && (
+          <div role="status" className="mb-3 w-full rounded-xl border-2 border-warning bg-warning/25 px-3.5 py-2.5 text-[12px] leading-snug text-content-strong">
+            <span className="font-bold">Handwriting reading is off.</span> No API key is set on this
+            deployment, so whatever you photograph will not be read &mdash; you&rsquo;ll get a fixed
+            sample list instead, clearly marked.
+          </div>
+        )}
         <div className="relative flex h-[380px] w-full items-center justify-center overflow-hidden rounded-3xl bg-[#121316]">
           <video
             ref={videoRef}

@@ -40,6 +40,10 @@ export function ReviewClient({
   const [error, setError] = useState<string | null>(null);
 
   const byId = useMemo(() => new Map(catalogue.map((c) => [c.id, c])), [catalogue]);
+  // Fixture rows have fixture coordinates. Painting them over the photo someone just
+  // took reads as a confident misreading of their handwriting, so the overlay is only
+  // ever shown for a real read.
+  const isDemo = provider === 'mock';
   const ready = lines.filter((l) => l.itemId && l.quantity > 0);
   const unresolved = lines.filter((l) => !l.itemId || l.quantity <= 0);
   const copy = ACTION_COPY[action];
@@ -93,29 +97,40 @@ export function ReviewClient({
       <div className="no-scrollbar flex-1 overflow-y-auto px-5 pb-40">
         {provider === 'mock' && <DemoOcrBanner className="mb-3" />}
 
-        <OcrOverlay
-          src={photo}
-          chips={lines.map((l) => ({
-            id: l.id,
-            bbox: l.bbox,
-            label: l.itemId ? byId.get(l.itemId)!.name : l.itemGuess,
-            quantity: l.quantity,
-            needsReview: !l.itemId || l.quantity <= 0,
-          }))}
-          className="h-56 w-full"
-          showOverlay={showOverlay}
-          activeId={activeId}
-          onChipClick={(id) => {
-            setActiveId(id);
-            document.getElementById(`line-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }}
-        />
+        <div className="relative">
+          <OcrOverlay
+            src={photo}
+            chips={lines.map((l) => ({
+              id: l.id,
+              bbox: l.bbox,
+              label: l.itemId ? byId.get(l.itemId)!.name : l.itemGuess,
+              quantity: l.quantity,
+              needsReview: !l.itemId || l.quantity <= 0,
+            }))}
+            className="h-56 w-full"
+            showOverlay={showOverlay && !isDemo}
+            activeId={activeId}
+            onChipClick={(id) => {
+              setActiveId(id);
+              document.getElementById(`line-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }}
+          />
+          {isDemo && (
+            <span className="absolute bottom-2 left-2 rounded-md bg-content-strong/85 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
+              Your photo &middot; not read
+            </span>
+          )}
+        </div>
 
         <div className="mt-2 flex items-center justify-between">
-          <label className="flex items-center gap-2 text-[11px] text-content-medium">
-            <input type="checkbox" checked={showOverlay} onChange={(e) => setShowOverlay(e.target.checked)} className="accent-brand-600" />
-            Show what was read
-          </label>
+          {isDemo ? (
+            <span className="text-[11px] text-content-medium">Sample rows below</span>
+          ) : (
+            <label className="flex items-center gap-2 text-[11px] text-content-medium">
+              <input type="checkbox" checked={showOverlay} onChange={(e) => setShowOverlay(e.target.checked)} className="accent-brand-600" />
+              Show what was read
+            </label>
+          )}
           <span className="text-[11px] text-content-medium">{storeroomName}</span>
         </div>
 
@@ -167,8 +182,9 @@ export function ReviewClient({
                 } ${activeId === line.id ? 'ring-2 ring-brand-600/30' : ''}`}
               >
                 <p className="text-[10px] uppercase tracking-wide text-content-medium">
-                  Written: &ldquo;{line.rawText}&rdquo;
-                  {line.confidence > 0 && ` · ${Math.round(line.confidence * 100)}% sure`}
+                  {isDemo ? 'Sample row · ' : 'Written: '}
+                  &ldquo;{line.rawText}&rdquo;
+                  {!isDemo && line.confidence > 0 && ` · ${Math.round(line.confidence * 100)}% sure`}
                 </p>
 
                 <div className="mt-2 flex items-center gap-2">

@@ -35,8 +35,17 @@ Rules:
 - "documentAction": "withdraw" if the page says withdrawn / taken / used / issued;
   "dispose" if it says disposed / discarded / expired / wasted / binned; "unknown" if
   neither appears. Put the deciding words in "actionEvidence".
-- "bbox" is [x0,y0,x1,y1] for the written line, on a 0-1000 by 0-1000 canvas over the
-  whole image, regardless of the image's real pixel size. Cover the text tightly.
+- "bbox" is [x0,y0,x1,y1] for the written line, on a 0-1000 by 0-1000 canvas laid over
+  the WHOLE image (0,0 = top-left, 1000,1000 = bottom-right), regardless of the image's
+  real pixel size or aspect ratio. Get this right - it is drawn straight onto the photo,
+  so a loose box visibly fails to highlight the words it names:
+    * Wrap only that line's ink: from the left edge of its first character to the right
+      edge of its last, and from the top of its tallest stroke to the bottom of its
+      lowest descender.
+    * Do NOT extend a box to the full width of the page or the margin. Handwritten lists
+      are short lines with empty paper to the right; the box should stop at the ink.
+    * Do NOT let two boxes overlap. Every line gets its own vertical band.
+    * Include the quantity and the item in the same box, since they are one written line.
 - If the photo shows no legible list at all, return an empty "lines" array rather than
   inventing entries.`;
 }

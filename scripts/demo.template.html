@@ -173,7 +173,8 @@
   }
   .ov .box.q { border-color: var(--warn); background: rgba(244,195,68,.22); }
   .ov .tag {
-    position: absolute; transform: translateY(-100%); margin-top: -3px; left: 0;
+    position: absolute; top: 50%; transform: translateY(-50%);
+    overflow: hidden; text-overflow: ellipsis;
     background: var(--brand); color: #fff; font-size: 10px; font-weight: 600;
     padding: 2px 6px; border-radius: 5px; white-space: nowrap;
     font-family: "Nata Sans", sans-serif; box-shadow: 0 2px 6px rgba(0,0,0,.25);
@@ -386,7 +387,7 @@
   const S = {
     step:"home", reason:"EMERGENCY", action:"WITHDRAW",
     photoURL:null, thumb:null, file:null, rows:[], transcript:"", readBy:"",
-    busy:false, error:null, lastRef:null
+    busy:false, error:null, lastRef:null, simulated:false
   };
 
   const $ = id => document.getElementById(id);
@@ -464,7 +465,8 @@
         S.rows = prep(SAMPLE.rows);
         S.transcript = SAMPLE.transcript;
         S.action = SAMPLE.action;
-        S.readBy = live ? "Sample note (no photo chosen)" : "Simulated reading — no API key on the server";
+        S.readBy = live ? "Sample note (no photo chosen)" : "Simulated — your photo was not read";
+        S.simulated = true;
       } else {
         const form = new FormData();
         form.append("photo", file);
@@ -475,6 +477,7 @@
         S.transcript = data.transcript || "";
         S.action = data.action === "DISPOSE" ? "DISPOSE" : "WITHDRAW";
         S.readBy = data.readBy || "Read from your photo";
+        S.simulated = false;
       }
       S.step = "review";
     } catch (e) {
@@ -514,16 +517,28 @@
   /* ================= Phone ================= */
   const STEPS = ["home", "reason", "capture", "review", "done"];
 
+  /* Labels sit BESIDE their line, not stacked above it. Above was the obvious
+     placement and it was wrong: handwritten lines sit close together, so every label
+     landed on the line above and the overlay became a pile of overlapping bars. A
+     written list has empty paper to its right, which is where a label belongs. */
   function overlay(rows) {
     return `<div class="ov">${rows.filter(r => r.bbox).map(r => {
       const [x0, y0, x1, y1] = r.bbox;
       const it = r.sku ? BY_SKU.get(r.sku) : null;
       const q = r.flag ? "q" : "";
+      // Percentages inside the box resolve against the box, so the paper still free to
+      // the right has to be converted into box-relative units before it can cap the label.
+      const boxW = Math.max(1, (x1 - x0) / 10);
+      const freeRight = (1000 - x1) / 10;
+      const inside = freeRight < 14;
+      const maxW = inside ? 94 : Math.max(40, ((freeRight - 2) / boxW) * 100);
+      const place = inside ? "right:4px" : "left:calc(100% + 6px)";
       const label = `${r.qty > 0 ? r.qty + " × " : ""}${esc(it ? it.name : r.guess)}${r.flag ? " ?" : ""}`;
       return `<div class="box ${q}" style="left:${x0/10}%;top:${y0/10}%;width:${(x1-x0)/10}%;height:${(y1-y0)/10}%">
-        <span class="tag ${q}">${label}</span></div>`;
+        <span class="tag ${q}" style="${place};max-width:${maxW}%">${label}</span></div>`;
     }).join("")}</div>`;
   }
+
   function paper() {
     return `<div class="paper">${SAMPLE.ink.map(l => `<span style="left:${l.x}%;top:${l.y}%">${esc(l.t)}</span>`).join("")}</div>`;
   }
@@ -611,8 +626,12 @@
       $("ptitle").textContent = "Review list";
       const flagged = S.rows.filter(r => r.flag).length;
       const ready = S.rows.filter(r => r.sku && r.qty > 0).length;
+      const painted = S.simulated && S.photoURL ? null : S.rows;
       screen.innerHTML = `
-        ${shotHTML(S.rows)}
+        ${S.simulated ? `<div class="note"><span>&#9888;</span><div>
+          <b>Your photo was not read.</b> No API key is set on the server, so the rows below are a
+          fixed sample to walk the flow with &mdash; they have nothing to do with what you wrote.</div></div>` : ""}
+        ${shotHTML(painted)}
         <p class="tiny muted" style="margin:0;display:flex;justify-content:space-between;gap:8px">
           <span>${esc(S.readBy)}</span><span>${S.rows.length} line${S.rows.length === 1 ? "" : "s"}</span></p>
         <div>
@@ -631,7 +650,7 @@
             const now = it ? stockOf(it.sku) : null;
             const after = it ? now - r.qty : null;
             return `<div class="row ${r.flag ? "flag" : ""}" data-id="${r.id}">
-              <div class="wrote">Written: <em>&ldquo;${esc(r.rawText)}&rdquo;</em>${r.conf ? ` &middot; ${Math.round(r.conf * 100)}% sure` : ""}</div>
+              <div class="wrote">${S.simulated ? "Sample row: " : "Written: "}<em>&ldquo;${esc(r.rawText)}&rdquo;</em>${!S.simulated && r.conf ? ` &middot; ${Math.round(r.conf * 100)}% sure` : ""}</div>
               <div class="pickline">
                 <select data-f="sku">
                   <option value="">Pick an item&hellip;</option>
@@ -704,7 +723,7 @@
 
   function reset() {
     if (S.photoURL) URL.revokeObjectURL(S.photoURL);
-    Object.assign(S, { step:"home", photoURL:null, thumb:null, file:null, rows:[], transcript:"", error:null, action:"WITHDRAW" });
+    Object.assign(S, { step:"home", photoURL:null, thumb:null, file:null, rows:[], transcript:"", error:null, action:"WITHDRAW", simulated:false });
     paintPhone();
   }
 

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { CatalogueEntry, OcrOutcome, OcrResult } from '@/lib/ocr/types';
 import { matchItem } from '@/lib/ocr/match';
 
@@ -64,17 +63,20 @@ const NOTES: MockNote[] = [
 export const MOCK_NOTE_SLUGS = NOTES.map((n) => n.slug);
 
 /**
- * Pick a canned note. An explicit slug wins (the "Use a sample note" button passes one);
- * otherwise we hash the image so the same photo always yields the same reading, which
- * keeps the demo stable and makes test failures reproducible.
+ * Pick a canned note.
+ *
+ * An explicit slug wins (the "Use a sample note" button passes one). Otherwise this
+ * ALWAYS returns the same note - deliberately, and it used to hash the image to choose.
+ * Rotating between fixtures made the placeholder look like a model that read your photo
+ * and got it badly wrong, which is exactly the wrong impression: nothing here reads
+ * anything. One fixed answer, plus the banners the UI shows, makes that obvious.
  */
-function pickNote(image: Buffer, slug?: string): MockNote {
+function pickNote(_image: Buffer, slug?: string): MockNote {
   if (slug) {
     const named = NOTES.find((n) => n.slug === slug);
     if (named) return named;
   }
-  const digest = createHash('sha256').update(image).digest();
-  return NOTES[digest[0] % NOTES.length];
+  return NOTES[0];
 }
 
 export function mockHandwriting(image: Buffer, catalogue: CatalogueEntry[], slug?: string): OcrOutcome {
