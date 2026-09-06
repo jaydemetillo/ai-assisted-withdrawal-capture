@@ -17,7 +17,7 @@ export default async function HistoryPage() {
   return (
     <>
       <StatusBar />
-      <div className="no-scrollbar flex-1 overflow-y-auto px-5 pb-28 pt-4">
+      <div className="no-scrollbar flex-1 overflow-y-auto px-5 pb-[calc(7rem+var(--safe-b))] pt-4">
         <h1 className="text-2xl font-bold text-brand-600">History</h1>
         <p className="mt-1 text-sm text-content-medium">Everything logged from this device and the ward.</p>
 

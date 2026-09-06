@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 :root {
+  /* How much of the bottom of the screen the phone's home indicator or the browser's
+     toolbar is sitting on. Zero on a desktop, ~34px on a modern iPhone. */
+  --safe-b: env(safe-area-inset-bottom, 0px);
+
   --brand-50: #faf0fb;
   --brand-600: #9c2fa7;
   --brand-900: #5a1b61;

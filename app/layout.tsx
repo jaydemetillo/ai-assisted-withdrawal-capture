@@ -9,7 +9,9 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
+  // Without this, env(safe-area-inset-*) is always 0 and anything anchored to the
+  // bottom of the screen ends up under the home indicator or the browser's own toolbar.
+  viewportFit: 'cover',
   themeColor: '#9c2fa7',
 };
 

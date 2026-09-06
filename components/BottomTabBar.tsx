@@ -16,7 +16,7 @@ export function BottomTabBar() {
   const pathname = usePathname();
 
   return (
-    <nav className="pointer-events-auto absolute inset-x-2.5 bottom-3 z-20 flex h-[68px] items-center justify-between rounded-full bg-white px-2.5 shadow-sm2">
+    <nav className="pointer-events-auto absolute inset-x-2.5 bottom-[calc(0.75rem+var(--safe-b))] z-20 flex h-[68px] items-center justify-between rounded-full bg-white px-2.5 shadow-sm2">
       {TABS.map((tab) => {
         const active = tab.href === '/' ? pathname === '/' : pathname.startsWith(tab.href);
         return (

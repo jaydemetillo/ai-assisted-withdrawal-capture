@@ -13,6 +13,7 @@ export function PhoneFrame({ children }: { children: ReactNode }) {
         className="
           relative flex h-dvh w-full flex-col overflow-hidden bg-canvas-alt
           md:h-[844px] md:w-[390px] md:rounded-4xl md:border md:border-divider-strong md:shadow-2xl
+          md:[--safe-b:0px]
         "
       >
         {children}

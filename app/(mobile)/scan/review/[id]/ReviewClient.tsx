@@ -94,7 +94,7 @@ export function ReviewClient({
     <>
       <ScreenHeader title="Review list" onBack={() => router.push('/scan')} />
 
-      <div className="no-scrollbar flex-1 overflow-y-auto px-5 pb-40">
+      <div className="no-scrollbar flex-1 overflow-y-auto px-5 pb-[calc(11rem+var(--safe-b))]">
         {provider === 'mock' && <DemoOcrBanner className="mb-3" />}
 
         <div className="relative">
@@ -191,7 +191,7 @@ export function ReviewClient({
                   <select
                     value={line.itemId ?? ''}
                     onChange={(e) => patch(line.id, { itemId: e.target.value || null })}
-                    className={`min-w-0 flex-1 rounded-lg border px-2 py-2 text-sm ${
+                    className={`min-w-0 flex-1 rounded-lg border px-2 py-2 text-base ${
                       line.itemId ? 'border-divider-medium text-content-strong' : 'border-warning text-content-medium'
                     }`}
                   >
@@ -206,7 +206,7 @@ export function ReviewClient({
                     <input
                       type="number" min={0} inputMode="numeric" value={line.quantity}
                       onChange={(e) => patch(line.id, { quantity: Math.max(0, Number(e.target.value) || 0) })}
-                      className="w-10 border-x border-divider-medium py-2 text-center text-sm font-semibold"
+                      className="w-11 border-x border-divider-medium py-2 text-center text-base font-semibold"
                     />
                     <button type="button" aria-label="Increase" onClick={() => patch(line.id, { quantity: line.quantity + 1 })} className="px-2.5 py-2 text-content-medium">+</button>
                   </div>
@@ -231,7 +231,7 @@ export function ReviewClient({
         )}
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 border-t border-divider-medium bg-white/95 px-5 pb-6 pt-3 backdrop-blur">
+      <div className="absolute inset-x-0 bottom-0 border-t border-divider-medium bg-white/95 px-5 pb-[calc(1.5rem+var(--safe-b))] pt-3 backdrop-blur">
         {error && <p className="mb-2 text-xs text-critical">{error}</p>}
         <button
           type="button"

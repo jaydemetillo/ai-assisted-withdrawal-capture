@@ -22,7 +22,7 @@ export default function ScanReasonPage() {
       <StatusBar />
       <ScreenHeader title="Photo Mode" onBack={() => router.push('/')} />
 
-      <div className="flex flex-1 flex-col px-6 pb-6">
+      <div className="flex flex-1 flex-col px-6 pb-[calc(1.5rem+var(--safe-b))]">
         <h2 className="text-base text-content-strong">Why are you taking a photo of the list?</h2>
 
         <fieldset className="mt-16 flex flex-col gap-3">
