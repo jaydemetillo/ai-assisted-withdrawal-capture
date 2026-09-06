@@ -242,7 +242,7 @@ function CaptureInner() {
       <StatusBar />
       <ScreenHeader title="Capture List" onBack={() => { stopCamera(); router.push('/scan'); }} />
 
-      <div className="flex flex-1 flex-col items-center justify-between px-6 pb-[calc(1.5rem+var(--safe-b))] pt-4">
+      <div className="no-scrollbar flex min-h-0 flex-1 flex-col items-center justify-between gap-4 overflow-y-auto px-6 pb-[calc(1.5rem+var(--safe-b))] pt-4">
         {readingLive === false && (
           <div role="status" className="mb-3 w-full rounded-xl border-2 border-warning bg-warning/25 px-3.5 py-2.5 text-[12px] leading-snug text-content-strong">
             <span className="font-bold">Handwriting reading is off.</span> No API key is set on this

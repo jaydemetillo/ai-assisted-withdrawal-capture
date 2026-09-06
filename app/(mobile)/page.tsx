@@ -72,7 +72,7 @@ export default async function MobileHome() {
         </div>
       </div>
 
-      <div className="no-scrollbar flex-1 overflow-y-auto px-4 pb-[calc(7rem+var(--safe-b))] pt-4">
+      <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(7rem+var(--safe-b))] pt-4">
         <h1 className="text-2xl font-bold text-brand-600">
           {greeting()}, {user.name.split(' ')[0]}
         </h1>

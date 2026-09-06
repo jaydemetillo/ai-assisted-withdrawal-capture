@@ -100,7 +100,7 @@ function QrInner() {
       <StatusBar />
       <ScreenHeader title={mode === 'barcode' ? 'Scan Barcode' : 'Scan QR'} onBack={() => { stop(); router.push('/'); }} />
 
-      <div className="flex flex-1 flex-col items-center justify-between px-6 pb-[calc(1.5rem+var(--safe-b))] pt-4">
+      <div className="no-scrollbar flex min-h-0 flex-1 flex-col items-center justify-between gap-4 overflow-y-auto px-6 pb-[calc(1.5rem+var(--safe-b))] pt-4">
         <div className="relative flex h-[380px] w-full items-center justify-center overflow-hidden rounded-3xl bg-[#121316]">
           <video ref={videoRef} playsInline muted autoPlay className="absolute inset-0 size-full object-cover" />
           <div className="pointer-events-none relative size-[260px] rounded-2xl border border-dashed border-brand-50" />

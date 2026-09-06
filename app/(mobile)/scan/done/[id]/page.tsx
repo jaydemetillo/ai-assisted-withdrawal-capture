@@ -31,7 +31,7 @@ export default async function DonePage({ params }: { params: Promise<{ id: strin
   return (
     <>
       <StatusBar />
-      <div className="no-scrollbar flex-1 overflow-y-auto px-5 pb-[calc(7rem+var(--safe-b))] pt-6">
+      <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(7rem+var(--safe-b))] pt-6">
         <div className="flex size-14 items-center justify-center rounded-full bg-brand-50 text-2xl">✓</div>
         <h1 className="mt-4 text-2xl font-bold text-brand-600">{copy.past}</h1>
         <p className="mt-1 text-sm text-content-medium">

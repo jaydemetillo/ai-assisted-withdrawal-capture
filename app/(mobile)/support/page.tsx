@@ -7,7 +7,7 @@ export default function SupportPage() {
   return (
     <>
       <StatusBar />
-      <div className="flex-1 px-5 pt-4">
+      <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(7rem+var(--safe-b))] pt-4">
         <h1 className="text-2xl font-bold text-brand-600">Support</h1>
         <div className="mt-6">
           <EmptyState

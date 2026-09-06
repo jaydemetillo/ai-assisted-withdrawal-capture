@@ -94,7 +94,7 @@ export function ReviewClient({
     <>
       <ScreenHeader title="Review list" onBack={() => router.push('/scan')} />
 
-      <div className="no-scrollbar flex-1 overflow-y-auto px-5 pb-[calc(11rem+var(--safe-b))]">
+      <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(11rem+var(--safe-b))]">
         {provider === 'mock' && <DemoOcrBanner className="mb-3" />}
 
         <div className="relative">

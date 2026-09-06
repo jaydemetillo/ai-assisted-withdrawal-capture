@@ -108,7 +108,12 @@
   }
   .iconbtn.right { text-align: right; }
   .iconbtn:disabled { opacity: 0; pointer-events: none; }
-  .screen { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  /* min-height:0 or the pane grows to fit its content instead of scrolling, and the
+     frame's overflow:hidden clips the rest away unreachably. */
+  .screen {
+    flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 16px; display: flex; flex-direction: column; gap: 14px;
+  }
   .screen::-webkit-scrollbar { width: 0; }
 
   /* ---- Console --------------------------------------------------------- */
