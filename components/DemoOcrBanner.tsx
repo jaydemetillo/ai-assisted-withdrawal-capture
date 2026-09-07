@@ -4,6 +4,10 @@
  * This is deliberately loud. An earlier version was a quiet footnote next to plausible
  * item rows drawn over the user's own handwriting, and testers reasonably read that as
  * the model confidently misreading their note. Nothing was read at all.
+ *
+ * It is now a genuinely rare screen. The phone reads the handwriting itself with no key
+ * and no account, so a fixture only turns up when that reader could not run at all -
+ * a browser without WebAssembly, or no signal the first time it is used.
  */
 export function DemoOcrBanner({ className = '' }: { className?: string }) {
   return (
@@ -13,9 +17,10 @@ export function DemoOcrBanner({ className = '' }: { className?: string }) {
     >
       <p className="text-[13px] font-bold">Your photo was not read.</p>
       <p className="mt-1">
-        No <code className="font-mono text-[11px]">ANTHROPIC_API_KEY</code> is set, so handwriting
-        reading is switched off. The rows below are a fixed sample so you can still walk the
-        flow &mdash; they have nothing to do with what you wrote.
+        Neither reader could run &mdash; the on-device one could not load, and no{' '}
+        <code className="font-mono text-[11px]">ANTHROPIC_API_KEY</code> is set. The rows below are
+        a fixed sample so you can still walk the flow &mdash; they have nothing to do with what you
+        wrote.
       </p>
     </div>
   );

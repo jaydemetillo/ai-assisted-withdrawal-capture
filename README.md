@@ -27,9 +27,10 @@ npm run dev         # http://localhost:3000
 Open `/` for the phone flow (drawn inside a device frame on a desktop browser) and
 `/admin` for the desktop console.
 
-**No API key needed to click through everything.** With `ANTHROPIC_API_KEY` unset the app
-uses bundled sample readings and labels them "Demo reading" wherever they appear, so a
-fixture is never mistaken for a real read. Set the key to read actual handwriting.
+**No API key needed, and the handwriting is still really read.** The phone reads the photo
+itself — Tesseract's LSTM engine compiled to WebAssembly, running in the browser that took
+the picture. Free, offline, and the photo is never sent anywhere to be read. `ANTHROPIC_API_KEY`
+is optional and buys accuracy, not the feature.
 
 ---
 
@@ -51,10 +52,10 @@ Then:
 Submit a list on the phone and it is in the desktop table on the next load, with the
 photo attached. **One database, both surfaces** - which is the point of the thing.
 
-No API key is needed. Without one it reads a built-in sample note instead of your photo
-and says "Demo reading" on screen; everything else - the review gate, the amber flagging,
-the stock arithmetic, the admin corrections - is the real code. Add `ANTHROPIC_API_KEY` in
-Project Settings later to have it read your actual handwriting (a few cents per photo).
+No API key is needed, and photographing a note really does read it: the reading happens in
+the phone's own browser (see *How the reading actually works*). Nothing is metered, because
+nothing leaves the device to be read. Add `ANTHROPIC_API_KEY` in Project Settings later if
+you want the more accurate vision read instead (a few cents per photo).
 
 ### If pushes don't seem to deploy
 
@@ -160,7 +161,8 @@ Both are handled for you; you just have to provision them.
 ```bash
 # 1. In the Vercel dashboard, add a Postgres database and a Blob store to the project.
 #    That sets DATABASE_URL and BLOB_READ_WRITE_TOKEN automatically.
-# 2. Add ANTHROPIC_API_KEY in Project Settings -> Environment Variables.
+# 2. Optional: add ANTHROPIC_API_KEY in Project Settings -> Environment Variables, for the
+#    more accurate paid read. Photos are read on the phone for free without it.
 # 3. Deploy.
 vercel
 
@@ -173,8 +175,9 @@ DATABASE_URL="<the postgres url>" npm run setup
 `postgresql` at build time whenever `DATABASE_URL` is a Postgres URL. You do not edit
 anything by hand.
 
-`vercel.json` raises the `/api/captures` timeout to 120s, because reading a full page of
-handwriting takes longer than the 10s default.
+`vercel.json` raises the `/api/captures` timeout to 120s, because a vision read of a full
+page of handwriting takes longer than the 10s default. The free route does not need it —
+that reading has already happened on the phone by the time the request is made.
 
 Once deployed, the phone opens `https://your-app.vercel.app` and the desktop opens
 `https://your-app.vercel.app/admin`. One URL, one database, both surfaces.
@@ -187,40 +190,82 @@ Once deployed, the phone opens `https://your-app.vercel.app` and the desktop ope
 
 ## How the reading actually works
 
-One call to `claude-opus-5` does the whole job. The photo and the item catalogue go in;
-validated JSON comes back.
+There are two readers. **The default one costs nothing and needs no account**, and it is
+the one you get unless you deliberately configure the other.
+
+### The free one: the phone reads it
+
+Tesseract's LSTM engine, compiled to WebAssembly, running in a WebWorker in the browser
+that took the photo. No key, no server, no per-photo cost — and the photo is not uploaded
+to be read, only to be kept as evidence afterwards.
 
 ```
-photo ──▶ claude-opus-5 (vision)
-            transcribe → find line items → parse quantities
-            → match to catalogue SKUs → infer withdraw/dispose
-            → return a box around each line
-          ▼
-       resolveLines()  fuzzy-match anything the model left unmatched,
-                       flag anything low-confidence for a human
-          ▼
+photo ──▶ greyscale, stretch the contrast, size to 1500px      ─┐
+            ▼                                                   │  all in the browser
+          tesseract LSTM ──▶ words + per-word confidence         │  on the phone
+            ▼                                                   │
+          drop the noise the paper produced, keep the lines     ─┘
+            ▼
+       "check what it read"   the text, editable, before anything is created
+            ▼  ── upload: the photo, the text, and a box per line
+       parseWrittenList()  quantities out of "3x Masks" / "Masks x 3" / "NS 500ml ... 3"
+       matchItem()         alias and fuzzy matching to catalogue SKUs
+       applyDeviceReading() the engine's boxes and its doubt, back onto the rows
+            ▼
        review screen   nurse confirms or corrects  ◀── nothing has moved yet
-          ▼
+            ▼
        commitCapture() one database transaction: write the ledger, recompute stock
 ```
 
-There is no separate OCR step. Splitting transcription from parsing throws away the
-context that makes the parse good — the model can see that `NS 500ml` sits in a column of
-quantities and that `Withdrawn` at the bottom governs the whole page.
+Three things make a word-level engine usable for this:
 
-**No model training is required.** This is zero-shot: the model reads handwriting out of
-the box, and the only thing you tune is the prompt (`lib/ocr/prompt.ts`) and the item
-aliases in the database. There is no dataset to collect and no fine-tune to maintain.
+**A check step.** The engine reads words, not meaning, so `Masks` comes back as `Maske`
+about as often as not. It is shown back as editable text before a capture exists, so one
+tap fixes a letter. This is not politeness; it is the difference between a reader that
+mostly works and one nobody trusts.
+
+**Aliases absorb the rest.** `Maske` still resolves to `Surgical Mask (Level 2)`, because
+matching is fuzzy over the alias list. See *Aliases are what make it work* below — with
+this reader they matter more than ever.
+
+**A row the engine doubted cannot go through on its own.** It gets an explicit "Looks
+right" tap on the review screen. No confidence threshold can separate an invented number
+from a real one — the engine read a handwritten `??` as an ordinary `2` at the same
+confidence as a genuine `2` — so the only honest gate is a human saying so.
+
+The engine files are served from this app (`public/tesseract/`, filled in from
+`node_modules` by `scripts/copy-tesseract.mjs` at build time, gitignored). Not from a
+third-party CDN: that would make every read depend on someone else's uptime at the worst
+possible moment. About 6.8MB on first use, then cached — the WebAssembly by the HTTP
+cache, the language model in IndexedDB.
+
+### The paid one: one vision call
+
+Set `ANTHROPIC_API_KEY` and a photo goes to `claude-opus-5` instead. The photo and the item
+catalogue go in; validated JSON comes back — transcript, line items, quantities, SKUs,
+withdraw/dispose, and a box per line, in one call.
+
+It is markedly better on bad handwriting, because it reads the *page*: it can see that
+`NS 500ml` sits in a column of quantities and that `Withdrawn` at the bottom governs
+everything above it. That context is exactly what the free reader does not have.
+
+**No model training is required either way.** The vision path is zero-shot; the on-device
+path uses a stock English model. The only things you tune are the prompt
+(`lib/ocr/prompt.ts`) and the item aliases in the database. There is no dataset to collect
+and no fine-tune to maintain.
 
 Key files:
 
 | File | What it does |
 |---|---|
-| `lib/ocr/prompt.ts` | The instructions and the catalogue block. **Tune accuracy here first.** |
-| `lib/ocr/types.ts` | The Zod schema that constrains the reply. Change the shape here. |
+| `lib/ocr/device.ts` | **The free reader.** Preprocessing, the engine, the two passes. Browser only. |
+| `lib/ocr/device-text.ts` | Noise rules, and putting the engine's boxes and doubt back on the rows. Unit-tested. |
+| `lib/ocr/parse-text.ts` | Quantities and item names out of a line of text. No model involved. |
+| `lib/ocr/match.ts` | Alias and fuzzy matching, and the review-flagging rules. |
+| `lib/ocr/prompt.ts` | The vision instructions and catalogue block. **Tune paid accuracy here first.** |
+| `lib/ocr/types.ts` | The Zod schema that constrains the vision reply. Change the shape here. |
 | `lib/ocr/claude.ts` | The single vision call. |
-| `lib/ocr/match.ts` | Fuzzy fallback matching and the review-flagging rules. |
-| `lib/ocr/mock.ts` | Offline fixtures used when no API key is set. |
+| `lib/ocr/mock.ts` | Labelled fixtures, used only when neither reader can run. |
 | `lib/inventory.ts` | The ledger. Stock is always derived, never patched. |
 
 ### Two rules that keep it honest
@@ -252,24 +297,40 @@ procurement name. Add aliases in `prisma/seed.ts`; view them in `/admin/inventor
 ## Checking that it works
 
 ```bash
-npm test         # 25 unit tests: matching, review-flagging, ledger arithmetic
-npm run verify   # end-to-end against a running server: 130 -> 127, corrections, replays
-npm run ocr:check    # the real vision model against the handwriting fixtures
+npm test             # 66 unit tests: matching, parsing, noise rules, ledger arithmetic
+npm run verify       # end-to-end against a running server: 130 -> 127, corrections, replays
+npm run ocr:device   # the FREE on-device reader against the handwriting fixtures
+npm run ocr:check    # the paid vision model against the same fixtures
 ```
 
 `npm run verify` needs a server up (`npm run dev` in another terminal). It uploads a
 handwritten note, asserts stock has *not* moved while the capture is a draft, commits it,
 asserts masks went 130 → 127, corrects the row to 5 and asserts stock recomputes to 125,
-then asserts a replayed submit is refused.
+then asserts a replayed submit is refused. Its last step posts what the browser posts on
+the free route, and asserts the capture that comes out is a real one: the photo kept, the
+engine's boxes on the rows, a half-read line flagged for a human, and stock moving.
+
+`npm run ocr:device` needs nothing at all — no key, no database, no network. It runs the
+same engine, the same noise rules, the same parser and the same matcher the phone runs,
+and scores them against `fixtures/notes/expected.json`. **This is the check that tells you
+whether the free route works.** It currently passes 16 of 17: on `low-confidence.png` it
+reads the handwritten `4` as a `Y`, which lands as a quantity of zero and a row flagged for
+a human — the right failure, and the one the review gate exists for.
 
 `npm run ocr:check` needs `ANTHROPIC_API_KEY`. It refuses to fall back to the demo
 fixtures, because a green run against canned data would tell you nothing.
 
-**Point it at your own handwriting before trusting any accuracy number:**
+**Point either of them at your own handwriting before trusting any accuracy number:**
 
 ```bash
+npm run ocr:device -- ~/Desktop/photo-of-my-note.jpg
 ANTHROPIC_API_KEY=sk-... npm run ocr:check -- ~/Desktop/photo-of-my-note.jpg
 ```
+
+`ocr:device` skips the greyscale and contrast work, which needs a canvas and so only runs
+in the browser. On a real photo with a shadow across it the phone therefore does better
+than that script, not worse — but the phone is also the only place you can judge the
+whole interaction, so take a photo on one.
 
 The bundled fixtures in `fixtures/notes/` are rendered with real handwriting typefaces on
 a paper background — deliberately including messy quantity formats, domain abbreviations
@@ -287,9 +348,21 @@ ballpoint on creased paper under ward lighting is harder. Regenerate them with
   patient-adjacent data in production.
 - **One storeroom is assumed** for capture (`defaultStoreroom()`); the QR mode reads codes
   but does not yet switch storeroom from one.
-- **Bounding boxes are approximate.** They come from the same vision pass, so the overlay
-  chips sit near their line rather than exactly on it. If you need pixel-tight boxes, a
-  dedicated OCR service with word-level geometry would do better — at the cost of a second
-  provider and a separate parsing step.
+- **The free reader is word-level, not page-level.** It reads letters well and meaning not
+  at all, so expect a wrong letter per line or two on ordinary handwriting and worse on
+  cursive, faint pencil or a creased page photographed at an angle. That is why there is a
+  check step before a capture exists and a per-row confirmation after it. It cannot tell
+  you when it has invented a number — it read a handwritten `??` as an ordinary `2` at the
+  same confidence as a real one — so do not remove either gate.
+- **First use costs about 6.8MB.** The engine and language model download once per browser
+  and are then cached. Prewarming starts as soon as the capture screen opens, but on a bad
+  connection the first read is slow. Later reads need no network at all.
+- **Bounding boxes are approximate on the vision path.** They come from the same vision
+  pass, so the overlay chips sit near their line rather than exactly on it. The on-device
+  reader is the better of the two here: its boxes are real word geometry and land on the
+  handwriting.
+- **`/demo.html` still needs a key.** The self-contained no-database build calls
+  `/api/read`, which is the vision path only; it has not been given the on-device reader.
+  It only comes into play if you deploy with no database at all.
 - Barcode scanning needs `BarcodeDetector` (Chrome/Android). Elsewhere the QR fallback
   decodes QR codes only.

@@ -39,6 +39,7 @@ export function ReviewClient({
   const [showOverlay, setShowOverlay] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState<Set<string>>(new Set());
 
   const byId = useMemo(() => new Map(catalogue.map((c) => [c.id, c])), [catalogue]);
   // Fixture rows have fixture coordinates. Painting them over the photo someone just
@@ -47,12 +48,32 @@ export function ReviewClient({
   const isDemo = provider === 'mock';
   // A typed list has no photograph, so there is nothing to overlay - show the words instead.
   const isTyped = provider === 'typed' || !photo;
+  // Read on the phone itself, for nothing. Real geometry, so the overlay is real too.
+  const isDevice = provider === 'device';
   const ready = lines.filter((l) => l.itemId && l.quantity > 0);
   const unresolved = lines.filter((l) => !l.itemId || l.quantity <= 0);
+  /**
+   * Rows that name an item and a number, but where whoever read the note was not sure.
+   *
+   * These must not go through on their own. A reader that is unsure about a digit does
+   * not know it is unsure - the free on-device engine read a handwritten "??" as a
+   * perfectly ordinary "2" - and no confidence threshold can separate an invented number
+   * from a real one, because they arrive looking the same. So the row stops here until
+   * someone says it is right. That costs a tap; the alternative is stock quietly going
+   * wrong with an audit trail that says it was read correctly.
+   */
+  const unsure = lines.filter(
+    (l) => l.itemId && l.quantity > 0 && l.needsReview && !confirmed.has(l.id),
+  );
+  const blocked = unresolved.length + unsure.length;
   const copy = ACTION_COPY[action];
 
   function patch(id: string, next: Partial<Line>) {
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...next, needsReview: false } : l)));
+  }
+
+  function confirm(id: string) {
+    setConfirmed((prev) => new Set(prev).add(id));
   }
 
   async function submit() {
@@ -120,7 +141,10 @@ export function ReviewClient({
               quantity: l.quantity,
               needsReview: !l.itemId || l.quantity <= 0,
             }))}
-            className="h-56 w-full"
+            // Square, to match the capture frame. A note is written down the page, so a
+            // letterbox box rendered a portrait photo as a 168px-wide sliver with the
+            // labels crushed into it - the same reason the camera frame is square.
+            className="aspect-square w-full"
             showOverlay={showOverlay && !isDemo}
             activeId={activeId}
             onChipClick={(id) => {
@@ -147,7 +171,10 @@ export function ReviewClient({
               Show what was read
             </label>
           )}
-          <span className="text-[11px] text-content-medium">{storeroomName}</span>
+          <span className="text-[11px] text-content-medium">
+            {isDevice && 'Read on this phone · '}
+            {storeroomName}
+          </span>
         </div>
 
         {/* Withdraw vs Dispose: prefilled from the note's own wording, always overridable. */}
@@ -174,10 +201,10 @@ export function ReviewClient({
           </div>
         </div>
 
-        {unresolved.length > 0 && (
+        {blocked > 0 && (
           <p className="mt-4 rounded-lg bg-warning/30 px-3 py-2 text-[11px] text-content-strong">
-            {unresolved.length} row{unresolved.length === 1 ? '' : 's'} need{unresolved.length === 1 ? 's' : ''} your
-            confirmation before this can be submitted.
+            {blocked} row{blocked === 1 ? '' : 's'} need{blocked === 1 ? 's' : ''} your confirmation
+            before this can be submitted.
           </p>
         )}
 
@@ -185,6 +212,7 @@ export function ReviewClient({
           {lines.map((line) => {
             const item = line.itemId ? byId.get(line.itemId) : undefined;
             const flagged = !line.itemId || line.quantity <= 0;
+            const doubted = !flagged && line.needsReview && !confirmed.has(line.id);
             const after = item ? item.quantity - line.quantity : null;
 
             return (
@@ -194,7 +222,7 @@ export function ReviewClient({
                 onMouseEnter={() => setActiveId(line.id)}
                 onMouseLeave={() => setActiveId(null)}
                 className={`rounded-xl border bg-white p-3 transition-colors ${
-                  flagged ? 'border-warning' : 'border-divider-medium'
+                  flagged || doubted ? 'border-warning' : 'border-divider-medium'
                 } ${activeId === line.id ? 'ring-2 ring-brand-600/30' : ''}`}
               >
                 <p className="text-[10px] uppercase tracking-wide text-content-medium">
@@ -228,6 +256,21 @@ export function ReviewClient({
                   </div>
                 </div>
 
+                {doubted && (
+                  <div className="mt-2 flex items-center gap-2 rounded-lg bg-warning/25 px-2.5 py-2">
+                    <p className="min-w-0 flex-1 text-[11px] leading-snug text-content-strong">
+                      Not read confidently. Check the number against your note.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => confirm(line.id)}
+                      className="shrink-0 rounded-full bg-content-strong px-3 py-1.5 text-[11px] font-semibold text-white"
+                    >
+                      Looks right
+                    </button>
+                  </div>
+                )}
+
                 {item && line.quantity > 0 && (
                   <p className="mt-2 text-[11px] text-content-medium">
                     {item.quantity} → <strong className={`font-semibold ${after! < 0 ? 'text-critical' : 'text-content-strong'}`}>{after}</strong>{' '}
@@ -252,7 +295,7 @@ export function ReviewClient({
         <button
           type="button"
           onClick={submit}
-          disabled={submitting || ready.length === 0 || unresolved.length > 0}
+          disabled={submitting || ready.length === 0 || blocked > 0}
           className="w-full rounded-full bg-brand-600 py-4 text-base font-semibold text-white disabled:bg-divider-strong"
         >
           {submitting ? 'Submitting…' : `Confirm ${copy.noun} of ${ready.length} item${ready.length === 1 ? '' : 's'}`}

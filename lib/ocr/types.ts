@@ -62,8 +62,18 @@ export type ResolvedLine = {
   matchSource: 'MODEL' | 'FUZZY' | 'MANUAL' | 'NONE';
 };
 
+/**
+ * Who read the note.
+ *
+ * `device` is the free route: Tesseract's LSTM engine in WebAssembly, in the browser
+ * that took the photo. `claude` is the paid vision call. `mock` is the labelled fixture
+ * shown when neither is available, and `typed` is a list that arrived as text. The
+ * review screen branches on this, so a fixture can never be dressed up as a real read.
+ */
+export type OcrProvider = 'claude' | 'device' | 'mock' | 'typed';
+
 export type OcrOutcome = {
-  provider: 'claude' | 'mock';
+  provider: OcrProvider;
   model: string;
   result: OcrResult;
 };

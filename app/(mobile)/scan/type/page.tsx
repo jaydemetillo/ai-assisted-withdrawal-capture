@@ -7,11 +7,12 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { isReason } from '@/lib/constants';
 
 /**
- * The free route: the list as text rather than as a photograph.
+ * The list as text rather than as a photograph.
  *
- * Phones already read handwriting for nothing - iOS Live Text and Android Lens both do
- * it natively - so someone can copy the text off their own photo and paste it here. No
- * model call, no key, no cost, and the same review gate and ledger on the other side.
+ * Photographing the note is free too now - the capture screen reads it on the phone - so
+ * this is the fallback rather than the only way to avoid paying: for a note the reader
+ * cannot make out, for a browser that cannot run it, or for someone who would simply
+ * rather type. Same parser, same review gate, same ledger on the other side.
  */
 function TypeInner() {
   const router = useRouter();
@@ -50,8 +51,9 @@ function TypeInner() {
         <div className="rounded-xl bg-brand-50 px-3.5 py-3 text-[12.5px] leading-snug text-content-strong">
           <p className="font-semibold">Already photographed the note?</p>
           <p className="mt-1">
-            Open it in Photos, tap the text-selection button in the corner, then copy and paste it
-            here. Your phone reads the handwriting itself &mdash; no account and no cost.
+            Go back and pick it from your photo library &mdash; the app reads the handwriting on
+            this phone, for nothing. Or open it in Photos, tap the text-selection button in the
+            corner, and paste it here instead.
           </p>
         </div>
 

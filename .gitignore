@@ -14,3 +14,6 @@ certificates/
 coverage/
 tsconfig.tsbuildinfo
 .fixture-build/
+# The on-device reader's WebAssembly and language model, copied out of node_modules by
+# scripts/copy-tesseract.mjs at build time. 15MB of build output, not source.
+public/tesseract/

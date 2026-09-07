@@ -92,6 +92,52 @@ async function main() {
   const again = await fetch(`${BASE}/api/captures/${capture.id}/commit`, { method: 'POST' });
   check('second commit rejected', again.status, 400);
 
+  // The free route: the phone reads the photo itself and uploads the words with it. No
+  // key, no model call, and the capture that comes out has to be indistinguishable from
+  // any other - a real photo attached, real geometry on the rows, real stock movement.
+  // This posts what the browser posts; `npm run ocr:device` is what checks the reading.
+  console.log('\n8. The same photo, read on the device instead');
+  const gaugeBefore = await stockOf('GAUZE-10', storeroom.id);
+  const deviceForm = new FormData();
+  deviceForm.append('photo', new File([new Uint8Array(photo)], 'withdraw-basic.png', { type: 'image/png' }));
+  deviceForm.append('reason', 'FORGOT_TO_RECORD');
+  deviceForm.append('text', '12 x Gauze pads\n2 x Foley catheter 16Fr\nWithdrawn');
+  deviceForm.append(
+    'read',
+    JSON.stringify([
+      { text: '12 x Gauze pads', confidence: 0.92, bbox: [120, 130, 430, 175] },
+      { text: '2 x Foley catheter 16Fr', confidence: 0.61, bbox: [120, 185, 450, 230] },
+    ]),
+  );
+  deviceForm.append('engine', 'tesseract-lstm-eng (on device)');
+
+  const onDevice = await fetch(`${BASE}/api/captures`, { method: 'POST', body: deviceForm });
+  const deviceCapture = (await onDevice.json()) as { id?: string; provider?: string; error?: string };
+  if (!deviceCapture.id) throw new Error(`On-device upload failed: ${deviceCapture.error}`);
+  check('recorded as read on the device, not by a model', deviceCapture.provider, 'device');
+
+  const deviceDraft = await prisma.capture.findUniqueOrThrow({
+    where: { id: deviceCapture.id },
+    include: { lines: { include: { item: true } } },
+  });
+  const gauze = deviceDraft.lines.find((l) => l.item?.sku === 'GAUZE-10');
+  const foley = deviceDraft.lines.find((l) => l.item?.sku === 'FOLEY-16');
+  for (const line of deviceDraft.lines) {
+    console.log(
+      `   "${line.rawText}" -> ${line.item?.name ?? 'UNMATCHED'} x${line.quantity} ` +
+        `(${Math.round(line.confidence * 100)}%${line.needsReview ? ', needs review' : ''}) box=${line.bbox}`,
+    );
+  }
+  check('the photo is still kept as evidence', deviceDraft.photoPath.length > 0, true);
+  check('"Withdrawn" on the page set the action', deviceDraft.action, 'WITHDRAW');
+  check('12 x Gauze pads matched the catalogue', gauze?.quantity, 12);
+  check("the engine's box came through onto the row", JSON.parse(gauze?.bbox ?? 'null'), [120, 130, 430, 175]);
+  check('a line the engine half-read is flagged for a human', foley?.needsReview, true);
+
+  const deviceCommit = await fetch(`${BASE}/api/captures/${deviceCapture.id}/commit`, { method: 'POST' });
+  if (!deviceCommit.ok) throw new Error('On-device commit failed');
+  check('stock moved on a read that cost nothing', await stockOf('GAUZE-10', storeroom.id), gaugeBefore - 12);
+
   console.log(`\n${failures === 0 ? 'All checks passed.' : `${failures} check(s) FAILED.`}\n`);
   if (failures > 0) process.exitCode = 1;
 }
