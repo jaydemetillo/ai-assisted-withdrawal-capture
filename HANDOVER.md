@@ -29,10 +29,16 @@ to stand alone: a new session has none of the previous conversation.
 > - Demo/sample rows must never be drawn over a real photo or look like a real reading.
 > - Stock is derived from an append-only ledger, never patched in place.
 > - The photo areas are square — a note is written *down* a page, and a letterbox frame cut the bottom items out of shot.
-> - **The two gates on the free reader stay.** The engine reads words, not meaning: the
->   text is shown back editable before a capture exists, and a row the engine doubted needs
->   an explicit "Looks right" tap before it can be submitted. No confidence number can
->   catch an invented quantity — it read a handwritten `??` as an ordinary `2`.
+> - **Never block the user.** No screen refuses to move on. A doubted row is amber and
+>   says so; an unreadable photo still becomes a capture you can add items to by hand
+>   ("+ Add an item" on review). The engine cannot know when it has invented a number, so
+>   the defence is showing it plainly twice, not a gate.
+> - **The reader reads the ORIGINAL photo, not the 1600px upload copy** (`Shot.original`),
+>   and prepares it before reading: crop to the paper, straighten, scale up. Removing any
+>   of that takes a working read back to nothing on a real phone photo. The deskew sign is
+>   easy to get backwards — `estimateSkew` returns the correction, apply it as given.
+> - Boxes survive the crop and the rotation via `prepare()`'s `map`. Verified: they land
+>   on the handwriting in a photo shot at 7° with the note at 30% of frame.
 > - The reader's WebAssembly and language model are served from this app, never a CDN, so a
 >   read never depends on a third party. `scripts/copy-tesseract.mjs` puts them there at
 >   build time; `public/tesseract/` is gitignored build output.

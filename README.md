@@ -200,11 +200,11 @@ that took the photo. No key, no server, no per-photo cost — and the photo is n
 to be read, only to be kept as evidence afterwards.
 
 ```
-photo ──▶ greyscale, stretch the contrast, size to 1500px      ─┐
-            ▼                                                   │  all in the browser
-          tesseract LSTM ──▶ words + per-word confidence         │  on the phone
-            ▼                                                   │
-          drop the noise the paper produced, keep the lines     ─┘
+photo ──▶ find the paper, crop to it, straighten it, scale UP   ─┐
+            ▼                                                    │ all in the browser
+          tesseract LSTM ──▶ words + per-word confidence          │ on the phone,
+            ▼                                                     │ on the ORIGINAL
+          drop the noise the paper produced, keep the lines      ─┘ full-res photo
             ▼
        "check what it read"   the text, editable, before anything is created
             ▼  ── upload: the photo, the text, and a box per line
@@ -228,10 +228,20 @@ mostly works and one nobody trusts.
 matching is fuzzy over the alias list. See *Aliases are what make it work* below — with
 this reader they matter more than ever.
 
-**A row the engine doubted cannot go through on its own.** It gets an explicit "Looks
-right" tap on the review screen. No confidence threshold can separate an invented number
-from a real one — the engine read a handwritten `??` as an ordinary `2` at the same
-confidence as a genuine `2` — so the only honest gate is a human saying so.
+**Preparing the photo matters more than the engine does.** Four things, in order of how
+much they turned out to be worth: reading the *original* photo rather than the 1600px
+upload copy; cropping to the sheet of paper; straightening it (a note shot at 7° comes
+back in fragments, and getting the sign of that correction backwards makes it 14°); and
+scaling the crop *up* so small writing is tall enough to recognise. Before those, a note
+filling a quarter of a phone frame read as nothing at all. After them, all three
+quantities come back right.
+
+**Nothing blocks.** A row the engine was unsure of is amber and says so, and the button
+tells you how many rows it will record — but it always records them. An unreadable photo
+is still kept, and you name the items yourself on the review screen with "+ Add an item".
+The engine cannot tell you when it has invented a number (it read a handwritten `??` as an
+ordinary `2` at the same confidence as a genuine one), so the defence is showing the
+number plainly, next to the photo, twice — never refusing to move on.
 
 The engine files are served from this app (`public/tesseract/`, filled in from
 `node_modules` by `scripts/copy-tesseract.mjs` at build time, gitignored). Not from a

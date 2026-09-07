@@ -120,6 +120,16 @@ type Phase = 'framing' | 'reading' | 'checking' | 'sending';
 
 type Shot = {
   prepared: PreparedPhoto;
+  /**
+   * The photo as the camera gave it to us, full resolution, for the reader.
+   *
+   * NOT the uploaded copy. `preparePhoto` shrinks that to 1600px for the sake of the
+   * upload, and reading the shrunken one was quietly costing most of the accuracy: a note
+   * filling a quarter of a 12MP frame is 750px wide in the original and 240px in the
+   * upload, and 240px of handwriting is unreadable by anything. The two have the same
+   * aspect ratio, so boxes measured on this one still land correctly on that one.
+   */
+  original: Blob;
   /** Something to show the photo back with while the list is checked. */
   preview: string;
   /** Set when this came from the bundled sample rather than a camera. */
@@ -255,13 +265,25 @@ function CaptureInner() {
         form.append('reason', reason);
         if (current.prepared.thumbnail) form.append('thumbnail', current.prepared.thumbnail);
 
-        if (text.trim()) {
+        /**
+         * `engine` is what tells the server the phone did the reading, and it is sent
+         * even when the reading came back empty.
+         *
+         * That is deliberate: an unreadable photo still becomes a draft capture with the
+         * photo attached, and the person names the items on the review screen. Sending
+         * nothing instead would let the server fall back to the labelled sample fixture
+         * and paint invented rows over their real photograph.
+         *
+         * The one exception is the bundled sample note when the reader could not run at
+         * all - that is the "walk the flow on a laptop" path, and the fixture is the
+         * point of it.
+         */
+        const engineToSend = usedEngine ?? (current.sampleSlug ? null : 'on-device (unavailable)');
+        if (engineToSend) {
           form.append('text', text);
           form.append('read', JSON.stringify(lines));
-          if (usedEngine) form.append('engine', usedEngine);
+          form.append('engine', engineToSend);
         } else if (current.sampleSlug) {
-          // Nothing was read and this is the bundled sample, so the server can fall back
-          // to the fixture for that note - which the review screen labels as a fixture.
           form.append('sample', current.sampleSlug);
         }
 
@@ -303,7 +325,7 @@ function CaptureInner() {
       setPhase('reading');
       setProgress({ stage: 'loading', percent: 0, label: 'Getting the reader ready' });
       try {
-        const reading = await readOnDevice(current.prepared.upload, setProgress);
+        const reading = await readOnDevice(current.original, setProgress);
         setReadText(reading.text);
         setReadLines(reading.lines);
         setEngine(reading.engine);
@@ -339,7 +361,7 @@ function CaptureInner() {
           preview = URL.createObjectURL(prepared.upload);
           objectUrlRef.current = preview;
         }
-        await readAndCheck({ prepared, preview, sampleSlug });
+        await readAndCheck({ prepared, original: blob, preview, sampleSlug });
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not use that photo');
         setPhase('framing');
@@ -428,8 +450,14 @@ function CaptureInner() {
         )}
 
         {/* Square, because a stock list is written down a page rather than across it -
-            a letterbox frame cut the bottom items out of shot. */}
-        <div className="relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-3xl bg-[#121316]">
+            a letterbox frame cut the bottom items out of shot.
+            `shrink-0` is what makes it actually square, and it is not optional. This is a
+            flex item in a scrolling column, and a flex item whose height comes from
+            aspect-ratio has no basis to defend: the browser shrinks it to fit the
+            container before it will let the container scroll. Without this the frame
+            collapsed to a 70px letterbox strip the moment the panel below it grew - which
+            is exactly the bug the square was meant to fix. */}
+        <div className="relative flex aspect-square w-full shrink-0 items-center justify-center overflow-hidden rounded-3xl bg-[#121316]">
           {phase === 'framing' ? (
             <>
               <video
@@ -540,9 +568,9 @@ function CaptureInner() {
           <div className="flex w-full flex-col gap-3">
             {readerBroke ? (
               <div role="status" className="rounded-xl border-2 border-warning bg-warning/25 px-3.5 py-2.5 text-[12px] leading-snug text-content-strong">
-                <span className="font-bold">The reader could not run on this phone.</span> Nothing
-                was read from your photo. Write the list out below and it will still be recorded
-                against this photo.
+                <span className="font-bold">The reader could not run on this phone.</span> Write the
+                list below, or carry on and pick the items on the next screen. Either way it is
+                recorded against this photo.
               </div>
             ) : readText.trim() ? (
               <div className="rounded-xl bg-brand-50 px-3.5 py-2.5 text-[12px] leading-snug text-content-strong">
@@ -552,8 +580,9 @@ function CaptureInner() {
               </div>
             ) : (
               <div role="status" className="rounded-xl border-2 border-warning bg-warning/25 px-3.5 py-2.5 text-[12px] leading-snug text-content-strong">
-                <span className="font-bold">Nothing legible was found.</span> Retake it with the
-                note flat and well lit, or write the list out below.
+                <span className="font-bold">It couldn&rsquo;t make out the writing.</span> Write the
+                list below, or just carry on &mdash; your photo is kept either way and you can pick
+                the items on the next screen.
               </div>
             )}
 
@@ -577,13 +606,21 @@ function CaptureInner() {
 
             {error && <p className="text-xs text-critical">{error}</p>}
 
+            {/* Never disabled. An empty box is a legitimate answer - it means the reader
+                got nothing and the person would rather name the items on the next screen,
+                with the photo in front of them, than type them here. Refusing to move
+                them on would leave them stuck on a camera screen holding the note. */}
             <button
               type="button"
               onClick={() => shot && void send(shot, readText, readLines, engine)}
-              disabled={phase === 'sending' || readText.trim().length === 0}
+              disabled={phase === 'sending'}
               className="w-full rounded-full bg-brand-600 py-4 text-base font-semibold text-white disabled:bg-divider-strong"
             >
-              {phase === 'sending' ? 'Matching to the catalogue…' : 'Use this list'}
+              {phase === 'sending'
+                ? 'Matching to the catalogue…'
+                : readText.trim().length === 0
+                  ? 'Carry on and pick the items'
+                  : 'Use this list'}
             </button>
             <div className="flex gap-2">
               <button

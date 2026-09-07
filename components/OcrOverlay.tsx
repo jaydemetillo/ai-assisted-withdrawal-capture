@@ -99,6 +99,23 @@ export function OcrOverlay({
     return () => observer.disconnect();
   }, [measure]);
 
+  /**
+   * An image that was already in the cache never fires `load`.
+   *
+   * The handler below is the only thing that sets `loaded`, and the overlay is hidden
+   * until it does - so revisiting a capture, or arriving with the photo already fetched,
+   * showed the photograph with no highlights on it at all and no hint that anything was
+   * missing. Ask the element directly instead of waiting for an event that has been and
+   * gone.
+   */
+  useEffect(() => {
+    const img = imgRef.current;
+    if (img?.complete && img.naturalWidth > 0) {
+      setLoaded(true);
+      measure();
+    }
+  }, [measure, src]);
+
   let placed: Placed[] = [];
   if (size && size.w > 0 && size.h > 0) {
     const withBox = chips

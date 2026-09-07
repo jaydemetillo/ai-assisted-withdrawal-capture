@@ -39,7 +39,7 @@ export function ReviewClient({
   const [showOverlay, setShowOverlay] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState<Set<string>>(new Set());
+  const [added, setAdded] = useState<{ key: string; itemId: string | null; quantity: number }[]>([]);
 
   const byId = useMemo(() => new Map(catalogue.map((c) => [c.id, c])), [catalogue]);
   // Fixture rows have fixture coordinates. Painting them over the photo someone just
@@ -50,30 +50,37 @@ export function ReviewClient({
   const isTyped = provider === 'typed' || !photo;
   // Read on the phone itself, for nothing. Real geometry, so the overlay is real too.
   const isDevice = provider === 'device';
+  /**
+   * Nothing here blocks. Rows are either ready to record or they are not, and the button
+   * records the ready ones.
+   *
+   * An earlier version refused to submit until every doubted row had been confirmed. It
+   * was well meant - the free reader cannot tell you when it has invented a number - but
+   * a nurse standing at a shelf being refused by a screen is worse than a number they can
+   * see and correct. So the doubt is shown loudly on the row and in the button's own
+   * count, and the decision stays with the person rather than the form.
+   */
   const ready = lines.filter((l) => l.itemId && l.quantity > 0);
   const unresolved = lines.filter((l) => !l.itemId || l.quantity <= 0);
-  /**
-   * Rows that name an item and a number, but where whoever read the note was not sure.
-   *
-   * These must not go through on their own. A reader that is unsure about a digit does
-   * not know it is unsure - the free on-device engine read a handwritten "??" as a
-   * perfectly ordinary "2" - and no confidence threshold can separate an invented number
-   * from a real one, because they arrive looking the same. So the row stops here until
-   * someone says it is right. That costs a tap; the alternative is stock quietly going
-   * wrong with an audit trail that says it was read correctly.
-   */
-  const unsure = lines.filter(
-    (l) => l.itemId && l.quantity > 0 && l.needsReview && !confirmed.has(l.id),
-  );
-  const blocked = unresolved.length + unsure.length;
+  const doubted = ready.filter((l) => l.needsReview);
+  const addedReady = added.filter((a) => a.itemId && a.quantity > 0);
+  const willRecord = ready.length + addedReady.length;
   const copy = ACTION_COPY[action];
 
   function patch(id: string, next: Partial<Line>) {
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...next, needsReview: false } : l)));
   }
 
-  function confirm(id: string) {
-    setConfirmed((prev) => new Set(prev).add(id));
+  function addRow() {
+    setAdded((prev) => [...prev, { key: `new-${Date.now()}-${prev.length}`, itemId: null, quantity: 1 }]);
+  }
+
+  function patchAdded(key: string, next: Partial<{ itemId: string | null; quantity: number }>) {
+    setAdded((prev) => prev.map((a) => (a.key === key ? { ...a, ...next } : a)));
+  }
+
+  function removeAdded(key: string) {
+    setAdded((prev) => prev.filter((a) => a.key !== key));
   }
 
   async function submit() {
@@ -88,6 +95,7 @@ export function ReviewClient({
         body: JSON.stringify({
           action,
           lines: lines.map((l) => ({ id: l.id, itemId: l.itemId, quantity: l.quantity })),
+          added: addedReady.map((a) => ({ itemId: a.itemId, quantity: a.quantity })),
         }),
       });
       if (!save.ok) throw new Error(((await save.json()) as { error?: string }).error ?? 'Could not save your changes');
@@ -201,10 +209,23 @@ export function ReviewClient({
           </div>
         </div>
 
-        {blocked > 0 && (
-          <p className="mt-4 rounded-lg bg-warning/30 px-3 py-2 text-[11px] text-content-strong">
-            {blocked} row{blocked === 1 ? '' : 's'} need{blocked === 1 ? 's' : ''} your confirmation
-            before this can be submitted.
+        {(doubted.length > 0 || unresolved.length > 0) && (
+          <p className="mt-4 rounded-lg bg-warning/30 px-3 py-2 text-[11px] leading-snug text-content-strong">
+            {doubted.length > 0 && (
+              <>
+                {doubted.length} row{doubted.length === 1 ? '' : 's'} in amber{' '}
+                {doubted.length === 1 ? 'was' : 'were'} not read confidently &mdash; worth a glance
+                at the number.{' '}
+              </>
+            )}
+            {unresolved.length > 0 && (
+              <>
+                {unresolved.length} row{unresolved.length === 1 ? '' : 's'} still{' '}
+                {unresolved.length === 1 ? 'needs' : 'need'} an item and a quantity, and{' '}
+                {unresolved.length === 1 ? 'will' : 'will'} not be recorded until{' '}
+                {unresolved.length === 1 ? 'it does' : 'they do'}.
+              </>
+            )}
           </p>
         )}
 
@@ -212,7 +233,7 @@ export function ReviewClient({
           {lines.map((line) => {
             const item = line.itemId ? byId.get(line.itemId) : undefined;
             const flagged = !line.itemId || line.quantity <= 0;
-            const doubted = !flagged && line.needsReview && !confirmed.has(line.id);
+            const unsure = !flagged && line.needsReview;
             const after = item ? item.quantity - line.quantity : null;
 
             return (
@@ -222,7 +243,7 @@ export function ReviewClient({
                 onMouseEnter={() => setActiveId(line.id)}
                 onMouseLeave={() => setActiveId(null)}
                 className={`rounded-xl border bg-white p-3 transition-colors ${
-                  flagged || doubted ? 'border-warning' : 'border-divider-medium'
+                  flagged || unsure ? 'border-warning' : 'border-divider-medium'
                 } ${activeId === line.id ? 'ring-2 ring-brand-600/30' : ''}`}
               >
                 <p className="text-[10px] uppercase tracking-wide text-content-medium">
@@ -256,19 +277,10 @@ export function ReviewClient({
                   </div>
                 </div>
 
-                {doubted && (
-                  <div className="mt-2 flex items-center gap-2 rounded-lg bg-warning/25 px-2.5 py-2">
-                    <p className="min-w-0 flex-1 text-[11px] leading-snug text-content-strong">
-                      Not read confidently. Check the number against your note.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => confirm(line.id)}
-                      className="shrink-0 rounded-full bg-content-strong px-3 py-1.5 text-[11px] font-semibold text-white"
-                    >
-                      Looks right
-                    </button>
-                  </div>
+                {unsure && (
+                  <p className="mt-2 rounded-lg bg-warning/25 px-2.5 py-2 text-[11px] leading-snug text-content-strong">
+                    Not read confidently &mdash; check this number against your note.
+                  </p>
                 )}
 
                 {item && line.quantity > 0 && (
@@ -283,11 +295,80 @@ export function ReviewClient({
           })}
         </ul>
 
-        {lines.length === 0 && (
-          <p className="mt-6 rounded-xl border border-dashed border-divider-strong p-6 text-center text-sm text-content-medium">
-            Nothing legible was found on that photo. Go back and retake it with the list flat and well lit.
+        {/* Rows nobody read: the person adding what the photo could not give us. This is
+            what keeps an unreadable photo from being a dead end - the photograph is still
+            worth keeping as evidence, and they know what they took off the shelf. */}
+        {added.length > 0 && (
+          <ul className="mt-2.5 flex flex-col gap-2.5">
+            {added.map((row) => {
+              const item = row.itemId ? byId.get(row.itemId) : undefined;
+              const after = item ? item.quantity - row.quantity : null;
+
+              return (
+                <li key={row.key} className="rounded-xl border border-brand-600/40 bg-white p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] uppercase tracking-wide text-content-medium">Added by you</p>
+                    <button
+                      type="button"
+                      onClick={() => removeAdded(row.key)}
+                      className="text-[11px] font-semibold text-content-medium underline"
+                    >
+                      Remove
+                    </button>
+                  </div>
+
+                  <div className="mt-2 flex items-center gap-2">
+                    <select
+                      value={row.itemId ?? ''}
+                      onChange={(e) => patchAdded(row.key, { itemId: e.target.value || null })}
+                      className={`min-w-0 flex-1 rounded-lg border px-2 py-2 text-base ${
+                        row.itemId ? 'border-divider-medium text-content-strong' : 'border-warning text-content-medium'
+                      }`}
+                    >
+                      <option value="">Pick an item…</option>
+                      {catalogue.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+
+                    <div className="flex shrink-0 items-center rounded-lg border border-divider-medium">
+                      <button type="button" aria-label="Decrease" onClick={() => patchAdded(row.key, { quantity: Math.max(0, row.quantity - 1) })} className="px-2.5 py-2 text-content-medium">−</button>
+                      <input
+                        type="number" min={0} inputMode="numeric" value={row.quantity}
+                        onChange={(e) => patchAdded(row.key, { quantity: Math.max(0, Number(e.target.value) || 0) })}
+                        className="w-11 border-x border-divider-medium py-2 text-center text-base font-semibold"
+                      />
+                      <button type="button" aria-label="Increase" onClick={() => patchAdded(row.key, { quantity: row.quantity + 1 })} className="px-2.5 py-2 text-content-medium">+</button>
+                    </div>
+                  </div>
+
+                  {item && row.quantity > 0 && (
+                    <p className="mt-2 text-[11px] text-content-medium">
+                      {item.quantity} → <strong className={`font-semibold ${after! < 0 ? 'text-critical' : 'text-content-strong'}`}>{after}</strong>{' '}
+                      {item.unit}{after === 1 ? '' : 's'} in stock after this
+                      {after! < 0 && ' · more than the storeroom holds'}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {lines.length === 0 && added.length === 0 && (
+          <p className="mt-4 rounded-xl border border-dashed border-divider-strong p-5 text-center text-sm leading-snug text-content-medium">
+            Nothing legible came off that photo. The photo is kept either way &mdash; add the items
+            below, or go back and retake it with the note flat and well lit.
           </p>
         )}
+
+        <button
+          type="button"
+          onClick={addRow}
+          className="mt-3 w-full rounded-full border border-dashed border-brand-600 py-3 text-sm font-semibold text-brand-600"
+        >
+          + Add an item
+        </button>
       </div>
 
       <div className="absolute inset-x-0 bottom-0 border-t border-divider-medium bg-white/95 px-5 pb-[calc(1.5rem+var(--safe-b))] pt-3 backdrop-blur">
@@ -295,10 +376,14 @@ export function ReviewClient({
         <button
           type="button"
           onClick={submit}
-          disabled={submitting || ready.length === 0 || blocked > 0}
+          disabled={submitting || willRecord === 0}
           className="w-full rounded-full bg-brand-600 py-4 text-base font-semibold text-white disabled:bg-divider-strong"
         >
-          {submitting ? 'Submitting…' : `Confirm ${copy.noun} of ${ready.length} item${ready.length === 1 ? '' : 's'}`}
+          {submitting
+            ? 'Submitting…'
+            : willRecord === 0
+              ? 'Add an item to submit'
+              : `Confirm ${copy.noun} of ${willRecord} item${willRecord === 1 ? '' : 's'}`}
         </button>
       </div>
     </>

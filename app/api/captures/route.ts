@@ -63,26 +63,27 @@ export async function POST(request: Request) {
       loadCatalogue(),
     ]);
 
-    // The phone already read it: match the words, keep the engine's boxes, charge nothing.
-    const readOnPhone = typeof deviceText === 'string' && deviceText.trim().length > 0;
+    /**
+     * The phone read it: match the words, keep the engine's boxes, charge nothing.
+     *
+     * Keyed on the ENGINE field, not on whether any text came back, and that distinction
+     * matters. A photo the reader could not make out still has to become a draft capture
+     * with the photo attached, so the person can name the items on the review screen and
+     * carry on. Falling through to the fixture path instead would paint invented sample
+     * rows over their real photo, which is the one thing this app must never do.
+     */
+    const readOnPhone = typeof deviceEngine === 'string' && deviceEngine.trim().length > 0;
     let outcome: OcrOutcome;
     let resolved;
 
     if (readOnPhone) {
-      const text = deviceText.trim().slice(0, 5000);
+      const text = typeof deviceText === 'string' ? deviceText.trim().slice(0, 5000) : '';
       const parsed = parseWrittenList(text, catalogue);
-      if (parsed.lines.length === 0) {
-        return NextResponse.json(
-          { error: 'No items found in what was read. Fix the text, or write one item per line.' },
-          { status: 422 },
-        );
-      }
-
       const read = parseDeviceLines(safeJson(deviceRead));
       resolved = applyDeviceReading(parsed.lines, read);
       outcome = {
         provider: 'device',
-        model: typeof deviceEngine === 'string' && deviceEngine.trim() ? deviceEngine.trim().slice(0, 60) : 'on-device',
+        model: deviceEngine.trim().slice(0, 60),
         result: {
           documentAction: parsed.action ? (parsed.action.toLowerCase() as 'withdraw' | 'dispose') : 'unknown',
           actionEvidence: parsed.actionEvidence,

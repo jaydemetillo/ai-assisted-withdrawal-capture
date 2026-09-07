@@ -10,6 +10,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const body = (await request.json()) as {
     action?: string;
     lines?: { id: string; itemId?: string | null; quantity?: number; remove?: boolean }[];
+    /** Rows the person added by hand, for what the reader missed or could not see. */
+    added?: { itemId?: string | null; quantity?: number }[];
   };
 
   const capture = await prisma.capture.findUnique({ where: { id }, include: { lines: true } });
@@ -45,6 +47,32 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           matchSource: touched ? 'MANUAL' : existing.matchSource,
           confidence: touched ? 1 : existing.confidence,
           needsReview: !itemId || quantity <= 0,
+        },
+      });
+    }
+
+    /**
+     * Rows the person typed in themselves.
+     *
+     * A photo the reader could not make out must not be a dead end - it still has a
+     * photograph worth keeping, and the person standing there knows what they took. A
+     * hand-added row is MANUAL and fully confident by definition: nothing read it.
+     */
+    for (const line of (body.added ?? []).slice(0, 40)) {
+      const quantity = typeof line.quantity === 'number' ? Math.max(0, Math.round(line.quantity)) : 0;
+      if (!line.itemId || quantity <= 0) continue;
+
+      await db.captureLine.create({
+        data: {
+          captureId: id,
+          rawText: 'Added by hand',
+          itemId: line.itemId,
+          itemGuess: '',
+          quantity,
+          confidence: 1,
+          needsReview: false,
+          bbox: 'null',
+          matchSource: 'MANUAL',
         },
       });
     }
