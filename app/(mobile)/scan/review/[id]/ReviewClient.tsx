@@ -20,13 +20,14 @@ type Line = {
 };
 
 export function ReviewClient({
-  captureId, committed, photo, action: initialAction, provider, storeroomName, catalogue, lines: initialLines,
+  captureId, committed, photo, action: initialAction, provider, transcript, storeroomName, catalogue, lines: initialLines,
 }: {
   captureId: string;
   committed: boolean;
   photo: string;
   action: Action;
   provider: string;
+  transcript: string;
   storeroomName: string;
   catalogue: CatalogueItem[];
   lines: Line[];
@@ -44,6 +45,8 @@ export function ReviewClient({
   // took reads as a confident misreading of their handwriting, so the overlay is only
   // ever shown for a real read.
   const isDemo = provider === 'mock';
+  // A typed list has no photograph, so there is nothing to overlay - show the words instead.
+  const isTyped = provider === 'typed' || !photo;
   const ready = lines.filter((l) => l.itemId && l.quantity > 0);
   const unresolved = lines.filter((l) => !l.itemId || l.quantity <= 0);
   const copy = ACTION_COPY[action];
@@ -97,6 +100,16 @@ export function ReviewClient({
       <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(11rem+var(--safe-b))]">
         {provider === 'mock' && <DemoOcrBanner className="mb-3" />}
 
+        {isTyped ? (
+          <div className="rounded-2xl border border-divider-medium bg-white p-3.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-content-medium">
+              What you entered
+            </p>
+            <pre className="mt-1.5 whitespace-pre-wrap font-sans text-sm leading-relaxed text-content-strong">
+              {transcript || '—'}
+            </pre>
+          </div>
+        ) : (
         <div className="relative">
           <OcrOverlay
             src={photo}
@@ -121,9 +134,12 @@ export function ReviewClient({
             </span>
           )}
         </div>
+        )}
 
         <div className="mt-2 flex items-center justify-between">
-          {isDemo ? (
+          {isTyped ? (
+            <span className="text-[11px] text-content-medium">Read from your text</span>
+          ) : isDemo ? (
             <span className="text-[11px] text-content-medium">Sample rows below</span>
           ) : (
             <label className="flex items-center gap-2 text-[11px] text-content-medium">

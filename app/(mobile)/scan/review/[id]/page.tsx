@@ -35,6 +35,13 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
     quantity: item.stockLevels[0]?.quantity ?? 0,
   }));
 
+  let transcript = '';
+  try {
+    transcript = (JSON.parse(capture.ocrRaw) as { transcript?: string }).transcript ?? '';
+  } catch {
+    transcript = '';
+  }
+
   return (
     <>
       <StatusBar />
@@ -44,6 +51,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
         photo={photoUrl(capture.photoPath)}
         action={capture.action as 'WITHDRAW' | 'DISPOSE'}
         provider={capture.ocrProvider}
+        transcript={transcript}
         storeroomName={capture.storeroom.name}
         catalogue={catalogue}
         lines={capture.lines.map((line) => ({

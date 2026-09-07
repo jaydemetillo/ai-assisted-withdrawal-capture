@@ -43,6 +43,11 @@ export function similarity(a: string, b: string): number {
   return (2 * hits) / (bx.length + by.length);
 }
 
+/** True when `word` appears in `text` bounded by spaces or the ends of the string. */
+function isWholeWord(text: string, word: string): boolean {
+  return ` ${text} `.includes(` ${word} `);
+}
+
 export type MatchResult = { entry: CatalogueEntry; score: number } | null;
 
 /**
@@ -66,10 +71,19 @@ export function matchItem(text: string, catalogue: CatalogueEntry[], threshold =
   for (const entry of catalogue) {
     let score = similarity(needle, entry.name);
     for (const alias of entry.aliases) {
+      const normalized = normalize(alias);
       score = Math.max(score, similarity(needle, alias));
-      // "gloves m x 2 boxes" contains the alias outright; reward that without
-      // letting a 2-character alias match everything.
-      if (alias.length >= 4 && needle.includes(normalize(alias))) {
+
+      // "gloves m x 2 boxes" contains the alias outright - reward that.
+      if (normalized.length >= 4 && needle.includes(normalized)) {
+        score = Math.max(score, 0.9);
+      }
+
+      // Short aliases are the domain's own shorthand - "ns", "d5", "n95" - and a plain
+      // substring test would fire on any word containing those letters. Matching them as
+      // WHOLE WORDS keeps the signal and drops the false positives: "ns 500ml" hits,
+      // "sensor" does not.
+      if (normalized.length < 4 && normalized && isWholeWord(needle, normalized)) {
         score = Math.max(score, 0.9);
       }
     }

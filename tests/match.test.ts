@@ -37,6 +37,17 @@ describe('matchItem', () => {
     expect(matchItem('NS', catalogue)?.entry.sku).toBe('SAL-09-500');
   });
 
+  it('resolves a SHORT alias buried in a longer line', () => {
+    // "ns" is the ward's own shorthand; it has to survive being written with a strength.
+    expect(matchItem('NS 500ml', catalogue)?.entry.sku).toBe('SAL-09-500');
+  });
+
+  it('does not let a short alias match a word that merely contains it', () => {
+    // "ns" lives inside "sensor"; whole-word matching is what keeps them apart.
+    const hit = matchItem('ETCO2 sensor', catalogue);
+    expect(hit?.entry.sku).not.toBe('SAL-09-500');
+  });
+
   it('resolves an alias buried inside a longer line', () => {
     expect(matchItem('Gloves (M) x 2 boxes', catalogue)?.entry.sku).toBe('GLOVE-NIT-M');
   });
