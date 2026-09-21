@@ -1,35 +1,41 @@
 /**
  * Gets a deployed database ready without anyone running commands locally.
  *
- * Runs during `npm run build`, where DATABASE_URL is already set by the host:
- *   1. pushes the schema, so the tables exist;
- *   2. seeds the catalogue, but ONLY if the database is empty.
+ * Runs during `npm run build` on Vercel, where the Neon integration has already set the
+ * connection strings:
+ *   1. applies the checked-in migrations, so the tables exist;
+ *   2. seeds the catalogue and demo accounts, but ONLY if the database is empty — a
+ *      redeploy must never wipe stock somebody moved during a demo.
  *
- * The emptiness check is what makes a redeploy safe - `prisma/seed.ts` clears every
- * table before writing, so seeding on every build would silently wipe whatever was
- * captured during a demo.
- *
- * Skipped entirely for a local SQLite file, where `npm run setup` already covers it.
+ * Skipped entirely when not on a deployment host: locally, `npm run setup` covers it.
  */
 import { execFileSync } from 'node:child_process';
 import { PrismaClient } from '@prisma/client';
 
+const onDeployHost = Boolean(process.env.VERCEL);
 const url = process.env.DATABASE_URL ?? '';
-const isRemote = url.startsWith('postgres') || url.startsWith('mysql');
 
-if (!isRemote) {
-  console.log('[db] local database — skipping remote prepare (use `npm run setup`)');
+if (!onDeployHost) {
+  console.log('[db] not a deployment build — skipping remote prepare (use `npm run setup`)');
+  process.exit(0);
+}
+if (!url.startsWith('postgres')) {
+  // Deliberately NOT a build failure. A failed build leaves you with no URL at all and
+  // nothing to read; a successful one gives you a running app whose first screen says,
+  // in words, that it needs a database and where to add it. The second is far easier to
+  // act on, and nothing can be damaged by deploying without a database.
+  console.warn(
+    '\n[db] No DATABASE_URL — building anyway.\n' +
+      '     The app will start and tell you to add one. In Vercel:\n' +
+      '     Storage → Create Database → Neon (Postgres), then redeploy.\n',
+  );
   process.exit(0);
 }
 
 /**
- * Schema changes need a DIRECT connection, not a pooled one.
- *
- * Neon's Vercel integration points DATABASE_URL at the pooled endpoint, which is right
- * for a serverless app - many short-lived connections - but wrong for DDL: `prisma db
- * push` through a transaction-mode pooler fails. The integration also provides the
- * direct endpoint alongside it, under one of these names depending on which integration
- * added it, so prefer that for the push and leave the app on the pooled URL.
+ * Migrations need a DIRECT connection. Neon's integration points DATABASE_URL at the
+ * pooled endpoint — right for the running app, wrong for DDL through a transaction-mode
+ * pooler. It also provides the direct endpoint under one of these names.
  */
 function directUrl(): string {
   const candidates = [
@@ -37,46 +43,43 @@ function directUrl(): string {
     process.env.POSTGRES_URL_NON_POOLING,
     process.env.DIRECT_DATABASE_URL,
   ];
-  return candidates.find((value) => value && value.startsWith('postgres')) ?? url;
+  return candidates.find((v) => v && v.startsWith('postgres')) ?? url;
 }
 
-function run(args: string[], env?: Record<string, string>) {
+function run(args: string[], env: Record<string, string>) {
   execFileSync('npx', args, { stdio: 'inherit', env: { ...process.env, ...env } });
 }
 
 async function main() {
   const direct = directUrl();
-  console.log(
-    `[db] pushing schema (using the ${direct === url ? 'configured' : 'direct, unpooled'} connection)`,
-  );
+  console.log(`[db] applying migrations over the ${direct === url ? 'configured' : 'direct, unpooled'} connection`);
   try {
-    run(['prisma', 'db', 'push', '--skip-generate', '--accept-data-loss'], { DATABASE_URL: direct });
+    run(['prisma', 'migrate', 'deploy'], { DATABASE_URL: direct });
   } catch (error) {
+    // Migrations failing IS a build failure: shipping an app against a schema it does
+    // not match produces confusing runtime errors far from the cause.
     console.error(
-      '\n[db] Could not apply the schema.\n' +
-        '     Most often this is DATABASE_URL pointing at a POOLED connection, which\n' +
-        '     cannot run schema changes. Neon and Vercel Postgres also expose a direct\n' +
-        '     one - DATABASE_URL_UNPOOLED or POSTGRES_URL_NON_POOLING - and this script\n' +
-        '     uses it automatically when present. Check that variable exists on the\n' +
-        '     deployment, and that the database is reachable from the build.\n',
+      '\n[db] Could not apply migrations.\n' +
+        '     Most often DATABASE_URL points at a POOLED connection, which cannot run\n' +
+        '     schema changes. Neon also exposes a direct one as DATABASE_URL_UNPOOLED;\n' +
+        '     this script prefers it automatically when present. Check that variable\n' +
+        '     exists on the deployment and that the database is reachable.\n',
     );
     throw error;
   }
 
-  const prisma = new PrismaClient();
+  const prisma = new PrismaClient({ datasources: { db: { url: direct } } });
   try {
-    const storerooms = await prisma.storeroom.count();
-    if (storerooms > 0) {
-      console.log(`[db] already seeded (${storerooms} storerooms) - leaving existing data alone`);
+    const locations = await prisma.location.count();
+    if (locations > 0) {
+      console.log(`[db] already seeded (${locations} locations) — leaving existing data alone`);
       return;
     }
-    console.log('[db] empty database - seeding the catalogue');
   } finally {
     await prisma.$disconnect().catch(() => undefined);
   }
-  // Seeding opens its own client, so disconnect before handing over. It writes rows
-  // rather than DDL, so the pooled connection is fine - but the direct one is fine too
-  // and keeps this consistent with the push above.
+
+  console.log('[db] empty database — seeding the catalogue and demo accounts');
   run(['tsx', 'prisma/seed.ts'], { DATABASE_URL: direct });
 }
 

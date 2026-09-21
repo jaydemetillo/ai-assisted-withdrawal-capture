@@ -1,142 +1,129 @@
-/**
- * Invented but plausible ward-supply catalogue for the prototype.
- *
- * `aliases` is the important column: it is what lets a nurse write "3x Masks" and have
- * it land on "Surgical Mask (Level 2)". Add the sloppy, abbreviated, plural forms people
- * actually write - not the tidy procurement name.
- */
 import { PrismaClient } from '@prisma/client';
-import { CATALOGUE } from '../lib/catalogue';
+import { hashPassword } from '../lib/auth/password';
+import { normalize } from '../lib/catalogue/normalize';
+import { DEMO_USERS, ITEMS, LOCATIONS } from './seed-data';
 
+/**
+ * Seed the demo hospital.
+ *
+ * Idempotent: every write is an upsert keyed on a natural key, so running it twice does
+ * not duplicate a catalogue or reset a balance someone is mid-demo with. Re-running it
+ * DOES reset opening quantities — use `npm run db:reset` for a genuinely clean slate.
+ */
 const prisma = new PrismaClient();
 
-// The catalogue itself lives in lib/catalogue.ts so the demo route can share it.
-
-
-function daysFromNow(days: number): Date {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
 async function main() {
-  // Order matters: children before parents.
-  await prisma.transactionLine.deleteMany();
-  await prisma.transaction.deleteMany();
-  await prisma.captureLine.deleteMany();
-  await prisma.capture.deleteMany();
-  await prisma.stockLevel.deleteMany();
-  await prisma.item.deleteMany();
-  await prisma.storeroom.deleteMany();
-  await prisma.user.deleteMany();
+  const password = process.env.DEMO_PASSWORD || 'demo1234';
 
-  const aisha = await prisma.user.create({
-    data: { name: 'Aisha Rahman', initials: 'AR', role: 'admin' },
-  });
-  const fang = await prisma.user.create({
-    data: { name: 'Fang Wei', initials: 'FW', role: 'staff' },
-  });
+  // ── Fail before touching the database if the catalogue is internally inconsistent.
+  // An alias that maps to two items would silently route a withdrawal to the wrong one.
+  const seenAliases = new Map<string, string>();
+  for (const item of ITEMS) {
+    for (const alias of item.aliases) {
+      const key = normalize(alias);
+      const owner = seenAliases.get(key);
+      if (owner && owner !== item.sku) {
+        throw new Error(`Alias "${alias}" maps to both ${owner} and ${item.sku}. Fix prisma/seed-data.ts.`);
+      }
+      seenAliases.set(key, item.sku);
+    }
+  }
 
-  const s15 = await prisma.storeroom.create({
-    data: { code: 'S15', name: 'S15 Medical', ward: 'Ward 411', hospital: 'Sengkang General Hospital' },
-  });
-  const s22 = await prisma.storeroom.create({
-    data: { code: 'S22', name: 'S22 Consumables', ward: 'Ward 409', hospital: 'Sengkang General Hospital' },
-  });
+  // ── People ────────────────────────────────────────────────────────────────
+  const passwordHash = await hashPassword(password);
+  for (const user of DEMO_USERS) {
+    await prisma.user.upsert({
+      where: { email: user.email },
+      create: { ...user, passwordHash },
+      update: { name: user.name, role: user.role, passwordHash, isActive: true },
+    });
+  }
 
-  // A handful of near-dated batches so the "Expiring soon" card has real content.
-  const expiries: Record<string, number> = {
-    'SAL-09-500': 6, 'CHX-WIPE': 21, 'PARA-500': 38, 'SUTURE-3-0': 52,
-    'STER-WATER-10': 12, 'BLOOD-EDTA': 74, 'GAUZE-10': 400, 'ETCO2-AD': 500,
+  // ── Places ────────────────────────────────────────────────────────────────
+  const locations = new Map<string, string>();
+  for (const loc of LOCATIONS) {
+    const row = await prisma.location.upsert({
+      where: { code: loc.code },
+      create: { code: loc.code, name: loc.name, description: loc.description },
+      update: { name: loc.name, description: loc.description, isActive: true },
+    });
+    locations.set(loc.code, row.id);
+  }
+  const resusId = locations.get('ED_RESUS_02');
+  const storeId = locations.get('ED_STORE_01');
+  if (!resusId || !storeId) throw new Error('Seed locations missing');
+
+  // ── Catalogue, aliases, and opening balances ──────────────────────────────
+  for (const item of ITEMS) {
+    const row = await prisma.inventoryItem.upsert({
+      where: { sku: item.sku },
+      create: {
+        sku: item.sku,
+        displayName: item.displayName,
+        unit: item.unit,
+        category: item.category,
+        reorderThreshold: item.reorderThreshold,
+        reorderQuantity: item.reorderQuantity,
+        isControlled: item.isControlled ?? false,
+        isHighRisk: item.isHighRisk ?? false,
+      },
+      update: {
+        displayName: item.displayName,
+        unit: item.unit,
+        category: item.category,
+        reorderThreshold: item.reorderThreshold,
+        reorderQuantity: item.reorderQuantity,
+        isControlled: item.isControlled ?? false,
+        isHighRisk: item.isHighRisk ?? false,
+        isActive: true,
+      },
+    });
+
+    await prisma.inventoryAlias.deleteMany({ where: { itemId: row.id } });
+    for (const alias of item.aliases) {
+      await prisma.inventoryAlias.create({
+        data: { itemId: row.id, alias, normalizedAlias: normalize(alias) },
+      });
+    }
+
+    await prisma.inventoryBalance.upsert({
+      where: { itemId_locationId: { itemId: row.id, locationId: resusId } },
+      create: { itemId: row.id, locationId: resusId, quantityOnHand: item.resusQuantity },
+      update: { quantityOnHand: item.resusQuantity },
+    });
+
+    if (item.storeQuantity === null) {
+      await prisma.inventoryBalance.deleteMany({ where: { itemId: row.id, locationId: storeId } });
+    } else {
+      await prisma.inventoryBalance.upsert({
+        where: { itemId_locationId: { itemId: row.id, locationId: storeId } },
+        create: { itemId: row.id, locationId: storeId, quantityOnHand: item.storeQuantity },
+        update: { quantityOnHand: item.storeQuantity },
+      });
+    }
+  }
+
+  const counts = {
+    users: await prisma.user.count(),
+    locations: await prisma.location.count(),
+    items: await prisma.inventoryItem.count(),
+    aliases: await prisma.inventoryAlias.count(),
+    balances: await prisma.inventoryBalance.count(),
   };
 
-  for (const entry of CATALOGUE) {
-    const item = await prisma.item.create({
-      data: {
-        sku: entry.sku,
-        name: entry.name,
-        category: entry.category,
-        unit: entry.unit,
-        description: entry.description,
-        aliases: JSON.stringify(entry.aliases),
-        expiryDate: expiries[entry.sku] ? daysFromNow(expiries[entry.sku]) : null,
-      },
-    });
-
-    await prisma.stockLevel.create({
-      data: {
-        itemId: item.id, storeroomId: s15.id,
-        openingQuantity: entry.opening, quantity: entry.opening, reorderLevel: entry.reorder,
-      },
-    });
-    // The second storeroom carries a thinner, offset stock so transfers look plausible.
-    await prisma.stockLevel.create({
-      data: {
-        itemId: item.id, storeroomId: s22.id,
-        openingQuantity: Math.round(entry.opening * 0.4),
-        quantity: Math.round(entry.opening * 0.4),
-        reorderLevel: Math.round(entry.reorder * 0.5),
-      },
-    });
-  }
-
-  // Two historical transactions so the desktop table is not empty on first run.
-  const bySku = async (sku: string) => (await prisma.item.findUniqueOrThrow({ where: { sku } })).id;
-
-  await prisma.transaction.create({
-    data: {
-      reference: 'WD-00001', action: 'WITHDRAW', storeroomId: s15.id, userId: fang.id,
-      reason: 'FORGOT_TO_RECORD', remarks: 'Ward round restock, logged the next morning',
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 26),
-      lines: {
-        create: [
-          { itemId: await bySku('ETCO2-AD'), quantity: 2, delta: -2, rawText: '2x ETCO2 sensor', confidence: 0.96, remarks: 'Sensor replaced due to calibration drift' },
-          { itemId: await bySku('ECG-ELEC'), quantity: 4, delta: -4, rawText: '4x ECG electrodes', confidence: 0.93, remarks: 'Routine monitoring restock' },
-        ],
-      },
-    },
-  });
-
-  await prisma.transaction.create({
-    data: {
-      reference: 'DP-00001', action: 'DISPOSE', storeroomId: s15.id, userId: aisha.id,
-      reason: 'EMERGENCY', remarks: 'Expired batch pulled from shelf',
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 5),
-      lines: {
-        create: [
-          { itemId: await bySku('GAUZE-10'), quantity: 6, delta: -6, rawText: '6x gauze pads', confidence: 0.91, remarks: 'Gauze pads expired and removed from circulation' },
-        ],
-      },
-    },
-  });
-
-  // Bring the cached quantities in line with the ledger we just wrote.
-  const levels = await prisma.stockLevel.findMany();
-  for (const level of levels) {
-    const agg = await prisma.transactionLine.aggregate({
-      _sum: { delta: true },
-      where: { itemId: level.itemId, transaction: { storeroomId: level.storeroomId, voided: false } },
-    });
-    await prisma.stockLevel.update({
-      where: { id: level.id },
-      data: { quantity: level.openingQuantity + (agg._sum.delta ?? 0) },
-    });
-  }
-
-  const masks = await prisma.item.findUniqueOrThrow({ where: { sku: 'MASK-L2' } });
-  const maskLevel = await prisma.stockLevel.findUniqueOrThrow({
-    where: { itemId_storeroomId: { itemId: masks.id, storeroomId: s15.id } },
-  });
-
-  console.log(`Seeded ${CATALOGUE.length} items across 2 storerooms.`);
-  console.log(`  ${masks.name} in ${s15.name}: ${maskLevel.quantity}`);
-  console.log(`  Users: ${aisha.name} (admin), ${fang.name} (staff)`);
+  console.log('Seeded:');
+  console.log(`  ${counts.locations} locations (ED_RESUS_02, ED_STORE_01)`);
+  console.log(`  ${counts.items} inventory items, ${counts.aliases} approved aliases`);
+  console.log(`  ${counts.balances} location balances`);
+  console.log(`  ${counts.users} demo accounts, password: ${password}`);
+  for (const u of DEMO_USERS) console.log(`    ${u.email.padEnd(22)} ${u.role}`);
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
   })
-  .finally(() => prisma.$disconnect());
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

@@ -1,162 +1,619 @@
+// AI-Assisted Withdrawal Capture — data model.
+//
+// Read docs/data-model.md for the rationale and docs/safety-and-decision-rules.md for
+// the rules these tables exist to enforce. Two properties are load-bearing and should
+// not be relaxed without re-reading both:
+//
+//   1. InventoryTransaction is immutable and uniquely keyed by (submissionId,
+//      sourceCandidateId). That unique index is what makes a double-tap harmless.
+//   2. InventoryBalance.version is an optimistic lock. Every write is conditional on
+//      the version the caller read.
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Enumerations. Native Postgres enums, so an invalid state cannot be written even
+// by hand from psql.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Role {
+  nurse
+  supply_reviewer
+  admin
+}
+
+enum SubmissionStatus {
+  received // image stored, nothing read yet
+  extracting // a provider call is in flight
+  awaiting_review // proposals exist, a human has not decided
+  in_supply_review // escalated to the reviewer queue
+  confirmed // stock has moved; terminal
+  cancelled // withdrawn by the submitter; terminal
+  failed // extraction failed; the image and the submission are still kept
+}
+
+enum ExtractionStatus {
+  pending
+  running
+  succeeded
+  failed
+}
+
+/// Where a proposed line came from.
+///
+/// Written text is a HUMAN assertion of what they took, which our own matcher then
+/// verifies against the catalogue independently. A visual identification is the model's
+/// opinion about a photograph, with nothing to check it against — weaker evidence, and
+/// treated as such by the rules.
+enum EvidenceKind {
+  written_text
+  visible_item
+}
+
+/// What the extraction provider *claimed*. Untrusted input to the decision rules.
+enum ProviderStatus {
+  high_confidence
+  ambiguous
+  unmatched
+  unreadable
+  restricted
+}
+
+/// What the application *determined*, deterministically. Authoritative.
+enum Decision {
+  eligible
+  needs_review
+  ambiguous
+  unmatched
+  unreadable
+  restricted
+}
+
+/// What a human did about it.
+enum Disposition {
+  pending
+  confirmed // accepted as proposed
+  corrected // a human chose a different item or quantity
+  rejected // will not move stock
+  escalated // handed to the supply-review queue
+  applied // an InventoryTransaction exists for it
+}
+
+enum ReviewCaseKind {
+  ambiguous_candidate
+  unmatched_candidate
+  unreadable_candidate
+  restricted_candidate
+  stock_discrepancy
+  extraction_failed
+  /// Somebody took a supply that is not in this location's catalogue and asked for it
+  /// to be added. Never moves stock by itself.
+  catalogue_request
+}
+
+enum ReviewCaseStatus {
+  open
+  in_progress
+  awaiting_physical_check
+  resolved
+  rejected
+}
+
+enum ReviewCasePriority {
+  low
+  normal
+  high
+}
+
+enum TaskStatus {
+  open
+  in_progress
+  ordered
+  completed
+  cancelled
+}
+
+enum TxnType {
+  withdrawal
+  correction
+  reversal
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// People and places
+// ─────────────────────────────────────────────────────────────────────────────
+
 model User {
-  id        String   @id @default(cuid())
-  name      String
-  initials  String
-  role      String   @default("staff") // staff | admin
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(nurse)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  submissions        WithdrawalSubmission[] @relation("submitter")
+  confirmations      WithdrawalSubmission[] @relation("confirmer")
+  transactions       InventoryTransaction[]
+  auditEvents        AuditEvent[]
+  resolvedCandidates ExtractedCandidate[]
+  openedCases        ReviewCase[]           @relation("caseOpener")
+  assignedCases      ReviewCase[]           @relation("caseAssignee")
+  resolvedCases      ReviewCase[]           @relation("caseResolver")
+  assignedTasks      ReplenishmentTask[]
+  labelledPhotos     ItemReferencePhoto[]
+
+  @@index([role])
+}
+
+model Location {
+  id          String   @id @default(cuid())
+  code        String   @unique // ED_RESUS_02
+  name        String // ED Resus Bay 02
+  description String   @default("")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  balances        InventoryBalance[]
+  submissions     WithdrawalSubmission[]
+  transactions    InventoryTransaction[]
+  tasks           ReplenishmentTask[]
+  reviewCases     ReviewCase[]
+  auditEvents     AuditEvent[]
+  referencePhotos ItemReferencePhoto[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalogue
+// ─────────────────────────────────────────────────────────────────────────────
+
+model InventoryItem {
+  id          String  @id @default(cuid())
+  sku         String  @unique
+  displayName String
+  unit        String  @default("unit")
+  category    String  @default("general")
+  isActive    Boolean @default(true)
+
+  /// At or below this quantity, a confirmed withdrawal raises a ReplenishmentTask.
+  reorderThreshold Int @default(0)
+  /// How many to suggest ordering when it does.
+  reorderQuantity  Int @default(0)
+
+  /// Either flag routes a candidate to `restricted`: a nurse can never self-confirm it
+  /// while RESTRICTED_SELF_CONFIRM is false. isControlled is the legal category
+  /// (controlled drugs); isHighRisk is the clinical one (look-alike, sound-alike, or
+  /// high-consequence-if-wrong).
+  isControlled Boolean @default(false)
+  isHighRisk   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  aliases         InventoryAlias[]
+  balances        InventoryBalance[]
+  candidates      ExtractedCandidate[]   @relation("proposedItem")
+  matchedFor      ExtractedCandidate[]   @relation("matchedItem")
+  resolvedFor     ExtractedCandidate[]   @relation("resolvedItem")
+  visualMatchFor  ExtractedCandidate[]   @relation("visualMatchItem")
+  transactions    InventoryTransaction[]
+  tasks           ReplenishmentTask[]
+  reviewCases     ReviewCase[]
+  referencePhotos ItemReferencePhoto[]
+
+  @@index([isActive])
+  @@index([isControlled, isHighRisk])
+}
+
+/// An alternate spelling a nurse might write. `normalizedAlias` is UNIQUE ACROSS THE
+/// WHOLE TABLE, which is what mechanically prevents one phrase mapping to two items.
+/// An alias hit still only produces `eligible` when it is the sole catalogue match —
+/// see rule 4 in docs/safety-and-decision-rules.md.
+model InventoryAlias {
+  id              String   @id @default(cuid())
+  itemId          String
+  alias           String
+  normalizedAlias String   @unique
+  isApproved      Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  item InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+}
+
+/// Stock of one item at one location. The existence of this row is also what makes the
+/// item permitted at that location — one representation, so "stocked here" and
+/// "permitted here" cannot disagree.
+model InventoryBalance {
+  id             String   @id @default(cuid())
+  itemId         String
+  locationId     String
+  quantityOnHand Int      @default(0)
+  /// Optimistic lock. Every update is `WHERE id = ? AND version = ?`.
+  version        Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  item     InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  location Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, locationId])
+  @@index([locationId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Capture and extraction
+// ─────────────────────────────────────────────────────────────────────────────
+
+model WithdrawalSubmission {
+  id          String @id @default(cuid())
+  submitterId String
+  locationId  String
+
+  /// Opaque storage key, never a filesystem path. Resolved by the storage adapter.
+  imageKey       String
+  imageMediaType String
+  imageBytes     Int    @default(0)
+
+  status           SubmissionStatus @default(received)
+  extractionStatus ExtractionStatus @default(pending)
+
+  /// Which provider produced the reading, so the UI can say so honestly.
+  extractionProvider  String    @default("")
+  extractionModel     String    @default("")
+  /// Everything the provider read off the image. Never written to a log.
+  rawText             String?
+  extractionError     String?
+  extractionStartedAt DateTime?
+  extractionEndedAt   DateTime?
+  /// Development only: which mock scenario the demo asked for. Null in any real use,
+  /// and ignored entirely unless the active provider is a mock.
+  demoScenario        String?
+
+  /// Set by the first successful confirmation. A replay carrying the same key returns
+  /// the stored result instead of repeating the work.
+  confirmationKey String?   @unique
+  confirmedAt     DateTime?
+  confirmedById   String?
+  cancelledAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  submitter       User                   @relation("submitter", fields: [submitterId], references: [id])
+  confirmedBy     User?                  @relation("confirmer", fields: [confirmedById], references: [id])
+  location        Location               @relation(fields: [locationId], references: [id])
+  candidates      ExtractedCandidate[]
+  transactions    InventoryTransaction[]
+  reviewCases     ReviewCase[]
+  auditEvents     AuditEvent[]
+  referencePhotos ItemReferencePhoto[]
+
+  @@index([status, createdAt])
+  @@index([submitterId, createdAt])
+  @@index([locationId, status])
+}
+
+/// One proposed withdrawal line. Keeps the provider's claim and the application's
+/// decision side by side, permanently, so an audit can answer "the model said X, the
+/// rules said Y, the human chose Z".
+model ExtractedCandidate {
+  id           String @id @default(cuid())
+  submissionId String
+  /// Order the line appeared in the image.
+  sequence     Int
+
+  /// True when a person typed this line rather than a reader proposing it — the photo
+  /// missed it, or there was nothing readable. Kept distinct so an audit can tell
+  /// "the model read this" from "a nurse added this".
+  isManual Boolean @default(false)
+
+  /// Whether this came from words on the page or from recognising the item itself.
+  /// A visual identification is one opinion about a photograph with nothing to check it
+  /// against, so it can never be `eligible` — see rule 8b in lib/decision/rules.ts.
+  evidence EvidenceKind @default(written_text)
+
+  rawText            String
+  proposedQuantity   Int?
+  /// What the PROVIDER claimed. Kept verbatim, even when the rules disagree with it.
+  proposedItemId     String?
+  /// What the APPLICATION's own deterministic matcher concluded, independently of the
+  /// provider. Null when the text matched nothing, or matched more than one item.
+  matchedItemId      String?
+  /// 0..1, as reported by the provider. An input to the rules, never a proof.
+  providerConfidence Float          @default(0)
+  providerStatus     ProviderStatus
+  providerReason     String         @default("")
+
+  decision           Decision
+  /// Stable machine-readable rule identifier, e.g. "rule_4_multiple_matches".
+  decisionReasonCode String
+  /// What the nurse is shown, in plain words.
+  decisionMessage    String
+
+  /// Alternatives offered to a human when the text was ambiguous. Suggestions only:
+  /// a fuzzy match can never make a line confirmable on its own.
+  suggestedItemIds String[] @default([])
+
+  /// Where this line is in the photograph, as fractions of the PREPARED image (after
+  /// EXIF rotation and resizing) — never pixels, because the pixel frame the provider
+  /// read is not the one a browser renders. All four are null together: a partial box
+  /// is not a box. See lib/vision/boxes.ts.
+  boxX      Float?
+  boxY      Float?
+  boxWidth  Float?
+  boxHeight Float?
+
+  /// What the LEARNED visual index proposed, if it was consulted at all. Recorded for
+  /// exactly the reason proposedItemId is: an audit has to be able to see what each
+  /// opinion said, including when they disagreed and the human sided with neither.
+  visualMatchItemId   String?
+  visualMatchScore    Float    @default(0)
+  /// The reference photos behind that match, so agreement and overrules land on the
+  /// examples that actually produced it rather than on the item in general.
+  visualMatchPhotoIds String[] @default([])
+
+  resolvedItemId   String?
+  resolvedQuantity Int?
+  disposition      Disposition @default(pending)
+  resolvedById     String?
+  resolvedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  submission      WithdrawalSubmission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  proposedItem    InventoryItem?        @relation("proposedItem", fields: [proposedItemId], references: [id])
+  matchedItem     InventoryItem?        @relation("matchedItem", fields: [matchedItemId], references: [id])
+  resolvedItem    InventoryItem?        @relation("resolvedItem", fields: [resolvedItemId], references: [id])
+  resolvedBy      User?                 @relation(fields: [resolvedById], references: [id])
+  visualMatchItem InventoryItem?        @relation("visualMatchItem", fields: [visualMatchItemId], references: [id])
+  transaction     InventoryTransaction?
+  reviewCases     ReviewCase[]
+  referencePhoto  ItemReferencePhoto?
+
+  @@unique([submissionId, sequence])
+  @@index([submissionId, disposition])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The ledger
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Immutable. There is no update or delete path in application code: a mistake is
+/// corrected by writing a `correction` or `reversal` row, never by editing history.
+model InventoryTransaction {
+  id                String  @id @default(cuid())
+  submissionId      String?
+  /// The candidate this movement came from. Together with submissionId this is UNIQUE,
+  /// which is the hard guarantee that one proposed line can only ever move stock once.
+  sourceCandidateId String? @unique
+
+  itemId     String
+  locationId String
+  type       TxnType @default(withdrawal)
+
+  /// Negative for a withdrawal. before + delta == after, always.
+  quantityDelta  Int
+  quantityBefore Int
+  quantityAfter  Int
+
+  actorId      String
+  actorRole    Role
+  reason       String  @default("")
+  reviewCaseId String?
+
   createdAt DateTime @default(now())
 
-  captures     Capture[]
-  transactions Transaction[]
+  submission WithdrawalSubmission? @relation(fields: [submissionId], references: [id])
+  candidate  ExtractedCandidate?   @relation(fields: [sourceCandidateId], references: [id])
+  item       InventoryItem         @relation(fields: [itemId], references: [id])
+  location   Location              @relation(fields: [locationId], references: [id])
+  actor      User                  @relation(fields: [actorId], references: [id])
+  tasks      ReplenishmentTask[]
+
+  @@unique([submissionId, sourceCandidateId])
+  @@index([itemId, locationId, createdAt])
+  @@index([locationId, createdAt])
+  @@index([submissionId])
 }
 
-model Storeroom {
-  id       String @id @default(cuid())
-  code     String @unique // "S15"
-  name     String // "S15 Medical"
-  ward     String
-  hospital String
+model ReplenishmentTask {
+  id                       String  @id @default(cuid())
+  itemId                   String
+  locationId               String
+  triggeredByTransactionId String?
 
-  stockLevels  StockLevel[]
-  captures     Capture[]
-  transactions Transaction[]
+  quantityAtTrigger Int
+  reorderThreshold  Int
+  suggestedQuantity Int
+  status            TaskStatus @default(open)
+  assignedToId      String?
+  note              String     @default("")
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  item        InventoryItem         @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  location    Location              @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  triggeredBy InventoryTransaction? @relation(fields: [triggeredByTransactionId], references: [id])
+  assignedTo  User?                 @relation(fields: [assignedToId], references: [id])
+
+  // A partial unique index — "at most one OPEN task per item and location" — is added
+  // by hand in the migration, because Prisma's schema language cannot express one.
+  // See prisma/migrations/*/migration.sql.
+  @@index([status, locationId, createdAt])
+  @@index([itemId, locationId])
 }
 
-model Item {
-  id          String    @id @default(cuid())
-  sku         String    @unique
-  name        String
-  category    String
-  unit        String    @default("unit")
-  description String    @default("")
-  imageUrl    String    @default("")
-  expiryDate  DateTime?
+model ReviewCase {
+  id           String  @id @default(cuid())
+  submissionId String?
+  candidateId  String?
+  itemId       String?
+  locationId   String
 
-  /// JSON string[] of alternate spellings a nurse might scribble ("masks", "face mask").
-  /// This is what makes "3x Masks" resolve to "Surgical Mask (Level 2)".
-  aliases String @default("[]")
+  kind     ReviewCaseKind
+  status   ReviewCaseStatus   @default(open)
+  priority ReviewCasePriority @default(normal)
 
-  stockLevels  StockLevel[]
-  lines        TransactionLine[]
-  captureLines CaptureLine[]
+  summary        String @default("")
+  resolutionNote String @default("")
+
+  openedById   String?
+  assignedToId String?
+  resolvedById String?
+  resolvedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  submission WithdrawalSubmission? @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  candidate  ExtractedCandidate?   @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  item       InventoryItem?        @relation(fields: [itemId], references: [id])
+  location   Location              @relation(fields: [locationId], references: [id])
+  openedBy   User?                 @relation("caseOpener", fields: [openedById], references: [id])
+  assignedTo User?                 @relation("caseAssignee", fields: [assignedToId], references: [id])
+  resolvedBy User?                 @relation("caseResolver", fields: [resolvedById], references: [id])
+
+  @@index([status, locationId, createdAt])
+  @@index([kind, status])
+  @@index([submissionId])
 }
 
-model StockLevel {
-  id          String @id @default(cuid())
-  itemId      String
-  storeroomId String
+/// A capture photo, stored in the database.
+///
+/// Object storage is the right home for images at scale, but requiring one to be
+/// provisioned before the app works at all costs a setup step and produces an opaque
+/// failure when it is missing. A resized phone photo is a few hundred kilobytes, and a
+/// prototype takes a handful a day — Postgres holds that without complaint. Attach a
+/// Blob store and the adapter switches over with no change to any row.
+model StoredImage {
+  key       String   @id
+  mediaType String
+  bytes     Int
+  data      Bytes
+  createdAt DateTime @default(now())
 
-  /// The count this storeroom started the ledger with. Current stock is always
-  /// derived as openingQuantity + sum(committed line deltas) - never patched in place.
-  openingQuantity Int @default(0)
-
-  /// Cached derived value, rewritten by recomputeStock(). Read this; never trust a
-  /// hand-applied increment.
-  quantity Int @default(0)
-
-  /// Below this, the item shows as low stock on the mobile home screen.
-  reorderLevel Int @default(0)
-
-  item      Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  storeroom Storeroom @relation(fields: [storeroomId], references: [id], onDelete: Cascade)
-
-  @@unique([itemId, storeroomId])
+  @@index([createdAt])
 }
 
-/// One photograph of a handwritten list, plus whatever the OCR pass made of it.
-/// Stays DRAFT (and moves no stock) until the user confirms it on the review screen.
-model Capture {
-  id          String   @id @default(cuid())
-  photoPath   String
-  reason      String // EMERGENCY | FORGOT_TO_RECORD
-  action      String // WITHDRAW | DISPOSE  (inferred from the note, user-overridable)
-  status      String   @default("DRAFT") // DRAFT | COMMITTED | VOID
-  storeroomId String
-  userId      String
-  createdAt   DateTime @default(now())
+/// Append-only. Nothing in application code updates or deletes these rows.
+/// beforeValue/afterValue carry ids, quantities and statuses — never image bytes and
+/// never raw extracted text.
+model AuditEvent {
+  id            String   @id @default(cuid())
+  actorId       String?
+  actorRole     Role?
+  action        String
+  entityType    String
+  entityId      String
+  submissionId  String?
+  locationId    String?
+  beforeValue   Json?
+  afterValue    Json?
+  correlationId String   @default("")
+  createdAt     DateTime @default(now())
 
-  /// Raw provider response, kept verbatim for the evidence modal and for debugging
-  /// a bad read without re-running the model.
-  ocrRaw String @default("{}")
+  actor      User?                 @relation(fields: [actorId], references: [id], onDelete: NoAction)
+  submission WithdrawalSubmission? @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  location   Location?             @relation(fields: [locationId], references: [id])
 
-  /// "claude" | "mock" - so the UI can be honest about which produced a reading.
-  ocrProvider String @default("mock")
-  ocrModel    String @default("")
-
-  storeroom   Storeroom     @relation(fields: [storeroomId], references: [id])
-  user        User          @relation(fields: [userId], references: [id])
-  lines       CaptureLine[]
-  transaction Transaction?
+  @@index([entityType, entityId])
+  @@index([submissionId, createdAt])
+  @@index([action, createdAt])
+  @@index([createdAt])
 }
 
-/// A single parsed row of the note, before it is committed.
-model CaptureLine {
-  id        String @id @default(cuid())
-  captureId String
+// ─────────────────────────────────────────────────────────────────────────────
+// Visual recognition — the part that learns
+// ─────────────────────────────────────────────────────────────────────────────
 
-  rawText   String
-  itemId    String?
-  itemGuess String  @default("")
-  quantity  Int     @default(0)
-
-  confidence  Float   @default(0)
-  needsReview Boolean @default(false)
-  /// JSON [x0,y0,x1,y1] normalized 0-1000, for the overlay chips on the photo.
-  bbox        String  @default("null")
-  matchSource String  @default("MODEL") // MODEL | FUZZY | MANUAL | NONE
-
-  capture Capture @relation(fields: [captureId], references: [id], onDelete: Cascade)
-  item    Item?   @relation(fields: [itemId], references: [id])
-
-  @@index([captureId])
+/// How a reference photo came to exist.
+///
+/// The distinction is not cosmetic. `taught` is somebody deliberately saying "this is a
+/// chest seal"; `learned_from_correction` is a label we inferred because a human fixed a
+/// line and then confirmed the withdrawal. The second is free — nobody did extra work —
+/// but it is also the one that can quietly go wrong at scale, so it is separable,
+/// countable and deletable on its own.
+enum ReferencePhotoSource {
+  taught
+  learned_from_correction
 }
 
-/// A committed stock movement. This plus TransactionLine is the ledger of record.
-model Transaction {
-  id          String   @id @default(cuid())
-  reference   String   @unique
-  action      String // WITHDRAW | DISPOSE
-  storeroomId String
-  userId      String
-  captureId   String?  @unique
-  reason      String   @default("")
-  remarks     String   @default("")
-  voided      Boolean  @default(false)
-  createdAt   DateTime @default(now())
+/// One labelled photograph of one catalogue item at one location.
+///
+/// This table IS the learning. There is no model to retrain and no weights to redeploy:
+/// recognition is nearest-neighbour search over these vectors, so adding a row improves
+/// it immediately and deleting a row undoes that improvement immediately, with no
+/// residue. That property is why this design was chosen over fine-tuning — see
+/// docs/visual-recognition.md.
+///
+/// Three constraints are load-bearing:
+///
+///   1. `locationId` is part of every read. ED Resus and the store room stock different
+///      things, and an example from one is evidence about the other only by coincidence.
+///   2. `embeddingModel` is stored with the vector. Vectors from two different models
+///      are not comparable — cosine similarity between them is noise that looks like a
+///      score — so a read filters to the active model rather than mixing them.
+///   3. `sourceCandidateId` is unique. A confirmation that replays cannot teach the same
+///      lesson twice.
+model ItemReferencePhoto {
+  id         String @id @default(cuid())
+  itemId     String
+  locationId String
 
-  storeroom Storeroom         @relation(fields: [storeroomId], references: [id])
-  user      User              @relation(fields: [userId], references: [id])
-  capture   Capture?          @relation(fields: [captureId], references: [id])
-  lines     TransactionLine[]
-}
+  /// Opaque storage key, same adapter as capture photos.
+  imageKey  String
+  mediaType String
+  bytes     Int    @default(0)
 
-model TransactionLine {
-  id            String @id @default(cuid())
-  transactionId String
-  itemId        String
+  /// The vector. Postgres `double precision[]`; a few hundred rows of a few hundred
+  /// floats is nothing, and brute-force cosine over it is sub-millisecond. A vector
+  /// database earns its place in the thousands, not here.
+  embedding      Float[]
+  embeddingModel String
+  dimensions     Int     @default(0)
 
-  /// Magnitude as written on the note (always positive).
-  quantity Int
-  /// Signed effect on stock. Negative for both WITHDRAW and DISPOSE.
-  delta    Int
+  source            ReferencePhotoSource
+  labelledById      String?
+  submissionId      String?
+  /// The confirmed line this was learned from. Unique, so a replayed confirmation
+  /// cannot add the same example twice.
+  sourceCandidateId String?              @unique
 
-  rawText     String @default("")
-  confidence  Float  @default(1)
-  bbox        String @default("null")
-  matchStatus String @default("AUTO") // AUTO | CORRECTED | MANUAL
-  remarks     String @default("")
+  /// Reinforcement. `timesAgreed` is a FAMILIARITY count, never a correctness proof —
+  /// the UI must never present it as one. `timesOverruled` is the signal that matters:
+  /// an example that keeps producing corrections is an example to remove.
+  timesAgreed    Int @default(0)
+  timesOverruled Int @default(0)
 
-  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  item        Item        @relation(fields: [itemId], references: [id])
+  /// Soft delete, so removing a bad example is instantly reversible and the audit trail
+  /// still has something to point at.
+  isActive      Boolean   @default(true)
+  retiredAt     DateTime?
+  retiredReason String    @default("")
 
-  @@index([transactionId])
-  @@index([itemId])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  item       InventoryItem         @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  location   Location              @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  labelledBy User?                 @relation(fields: [labelledById], references: [id])
+  submission WithdrawalSubmission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  candidate  ExtractedCandidate?   @relation(fields: [sourceCandidateId], references: [id], onDelete: SetNull)
+
+  @@index([locationId, isActive, embeddingModel])
+  @@index([itemId, locationId, isActive])
+  @@index([locationId, createdAt])
 }

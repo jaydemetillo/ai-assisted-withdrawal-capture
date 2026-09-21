@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "ExtractedCandidate" ADD COLUMN     "boxHeight" DOUBLE PRECISION,
+ADD COLUMN     "boxWidth" DOUBLE PRECISION,
+ADD COLUMN     "boxX" DOUBLE PRECISION,
+ADD COLUMN     "boxY" DOUBLE PRECISION;

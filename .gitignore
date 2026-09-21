@@ -1,19 +1,17 @@
-node_modules/
-.next/
-out/
-build/
-.data/
-*.db
-*.db-journal
-prisma/dev.db*
-.env
-.env.local
+*.pem
+*.tsbuildinfo
 .DS_Store
-next-env.d.ts
-certificates/
+.data/
+.env
+.env*.local
+.next/
+.pgdata/
+.vercel
+build/
 coverage/
-tsconfig.tsbuildinfo
-.fixture-build/
-# The on-device reader's WebAssembly and language model, copied out of node_modules by
-# scripts/copy-tesseract.mjs at build time. 15MB of build output, not source.
-public/tesseract/
+next-env.d.ts
+node_modules/
+npm-debug.log*
+out/
+yarn-debug.log*
+yarn-error.log*

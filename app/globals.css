@@ -3,49 +3,73 @@
 @tailwind utilities;
 
 :root {
-  /* How much of the bottom of the screen the phone's home indicator or the browser's
-     toolbar is sitting on. Zero on a desktop, ~34px on a modern iPhone. */
+  /* The home indicator on a modern iPhone. Zero on a desktop. */
   --safe-b: env(safe-area-inset-bottom, 0px);
-
-  --brand-50: #faf0fb;
-  --brand-600: #9c2fa7;
-  --brand-900: #5a1b61;
-  --canvas-alt: #f8f9f9;
-  --content-strong: #2c2e34;
-  --content-medium: #666c7a;
-  --divider-medium: #ededed;
+  --safe-t: env(safe-area-inset-top, 0px);
 }
 
 html,
 body {
-  background: var(--canvas-alt);
-  color: var(--content-strong);
+  background: theme('colors.canvas.sunken');
+  color: theme('colors.ink.DEFAULT');
   -webkit-font-smoothing: antialiased;
-  /* Stop the whole page rubber-banding on iOS. Scrolling belongs to the panes inside
-     the app shell, not to the document. */
+  /* Scrolling belongs to the panes inside the shell, not to the document, or iOS
+     rubber-bands the whole app. */
   overscroll-behavior-y: none;
 }
 
-/* Hide the scrollbar inside the simulated phone viewport without losing scroll. */
-.no-scrollbar {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
+@layer components {
+  /* Every tappable thing is at least 48px tall. A nurse is using this one-handed. */
+  .btn {
+    @apply inline-flex min-h-tap items-center justify-center gap-2 rounded-xl px-5 text-base
+           font-semibold transition-colors disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-white hover:bg-brand-700 disabled:bg-line-strong disabled:text-ink-subtle;
+  }
+  .btn-secondary {
+    @apply btn border border-line-strong bg-canvas text-ink hover:bg-canvas-sunken;
+  }
+  .btn-quiet {
+    @apply btn text-ink-muted hover:bg-canvas-sunken;
+  }
+  .btn-danger {
+    @apply btn border border-stop-600/30 bg-stop-50 text-stop-900 hover:bg-stop-50/70;
+  }
+  .card {
+    @apply rounded-2xl border border-line bg-canvas shadow-card;
+  }
+  .field {
+    @apply min-h-tap w-full rounded-xl border border-line-strong bg-canvas px-4 text-base
+           text-ink outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100;
+  }
+  .label {
+    @apply block text-sm font-semibold text-ink-muted;
+  }
+  /* Status is carried by the word first and the colour second — the colour alone would
+     fail for a colour-blind user and in bright sun. */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold;
+  }
+  .pill-ok {
+    @apply pill bg-ok-50 text-ok-900;
+  }
+  .pill-warn {
+    @apply pill bg-warn-50 text-warn-900;
+  }
+  .pill-stop {
+    @apply pill bg-stop-50 text-stop-900;
+  }
+  .pill-quiet {
+    @apply pill bg-canvas-sunken text-ink-muted;
+  }
 }
 
-@keyframes scanSweep {
-  0%,
-  100% {
-    transform: translateY(-96px);
-    opacity: 0.25;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
   }
-  50% {
-    transform: translateY(96px);
-    opacity: 1;
-  }
-}
-.animate-scan-sweep {
-  animation: scanSweep 2.6s ease-in-out infinite;
 }
