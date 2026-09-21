@@ -6,6 +6,23 @@ confirms one**.
 
 **Repository:** <https://github.com/jaydemetillo/AI-Assisted-Withdrawal-Capture>
 
+> ### ⚠️ To run this for real you need two things
+>
+> **1. An `ANTHROPIC_API_KEY`** — this is what reads the photograph. Set
+> `EXTRACTION_PROVIDER=anthropic` alongside it. Costs a few cents per photo.
+>
+> **2. A database.** Free on [Neon](https://neon.tech) — on Vercel it is
+> **Storage → Create Database → Neon (Postgres)**, free plan, no credit card, and it sets
+> `DATABASE_URL` for you. Locally, `npm run db:up` runs one in this repo instead.
+>
+> You also need `SESSION_SECRET` (`openssl rand -hex 32`) or sign-in will not work. Full
+> list in [Deploying to Vercel](#deploying-to-vercel-so-other-people-can-use-it).
+>
+> **Without a key it still runs end to end** — `EXTRACTION_PROVIDER=mock` is the default
+> and plays fixed demo scenarios, so every screen, rule and audit trail is the real code.
+> It just is not reading *your* photo. Good for a walkthrough; not good for judging
+> accuracy.
+
 > **Status: built.** Twelve phases, 465 tests, typecheck and production build clean. A
 > nurse can photograph a note and confirm a proposal; only that confirmation moves stock,
 > exactly once, with an audit trail from the photo to the ledger row. It also recognises
