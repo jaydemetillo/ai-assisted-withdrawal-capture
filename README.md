@@ -4,7 +4,7 @@ Record an emergency supply withdrawal from **one photograph, taken afterwards** 
 letting any image-reading model touch stock. And have it get **better every time somebody
 confirms one**.
 
-**Repository:** <https://github.com/jaydemetillo/AI-Assisted-Withdrawal-Capture>
+**Repository:** <https://github.com/jaydemetillo/ai-assisted-withdrawal-capture>
 
 > ### ⚠️ To run this for real you need two things
 >
@@ -441,7 +441,7 @@ nothing to run locally. Sign-in is required on every page, so the link is privat
 people you give the demo accounts to.
 
 1. **vercel.com → Add New → Project → import
-   [`jaydemetillo/AI-Assisted-Withdrawal-Capture`](https://github.com/jaydemetillo/AI-Assisted-Withdrawal-Capture).**
+   [`jaydemetillo/ai-assisted-withdrawal-capture`](https://github.com/jaydemetillo/ai-assisted-withdrawal-capture).**
    Set the production branch to the branch you want deployed.
 2. **Storage → Create Database → Neon (Postgres)**, free plan. This sets `DATABASE_URL`
    and `DATABASE_URL_UNPOOLED` for you.
